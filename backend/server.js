@@ -71,6 +71,11 @@ io.on('connection', (socket) => {
     socket.to(data.tripId).emit('riderMoved', data);
   });
 
+  // C. Listen for custom ping signals and broadcast to the trip room
+  socket.on('pingRider', (data) => {
+    socket.to(data.tripId).emit('pingReceived', data);
+  });
+
   socket.on('disconnect', () => {
     console.log('🔌 Rider dropped off radar:', socket.id);
   });

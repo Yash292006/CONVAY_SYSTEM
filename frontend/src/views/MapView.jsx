@@ -22,6 +22,8 @@ const MapView = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRider, setSelectedRider] = useState(null);
   const [mapStyle, setMapStyle] = useState('mapbox://styles/mapbox/dark-v11');
+  const [incomingPing, setIncomingPing] = useState(null); // { fromName, message }
+  const [pingSent, setPingSent] = useState(false);
   
   const socketRef = useRef(null);
   const mapRef = useRef(null);
@@ -55,6 +57,13 @@ const MapView = () => {
         }
         return [...prev, incomingData];
       });
+    });
+
+    // Listen for incoming ping from another rider
+    socketRef.current.on('pingReceived', (data) => {
+      setIncomingPing(data);
+      // Auto-dismiss after 5 seconds
+      setTimeout(() => setIncomingPing(null), 5000);
     });
 
     // 2. Real GPS Tracking
@@ -325,10 +334,26 @@ const MapView = () => {
                     <Compass size={14} /> Center Map
                   </button>
                   <button
-                    onClick={() => alert(`Signaling ping to ${selectedRider.name}'s navigation console...`)}
-                    className="flex-1 py-2.5 bg-white/10 hover:bg-white/20 border border-white/10 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
+                    onClick={() => {
+                      const activeUser = JSON.parse(localStorage.getItem('convoyUser'));
+                      const searchParams = new URLSearchParams(window.location.search);
+                      const tripId = searchParams.get('trip') || 'demo-trip-room';
+                      socketRef.current?.emit('pingRider', {
+                        tripId,
+                        targetUserId: selectedRider.userId,
+                        fromName: activeUser?.name || 'Your teammate',
+                        message: `🏍️ ${activeUser?.name || 'A rider'} is calling you on the radar!`
+                      });
+                      setPingSent(true);
+                      setTimeout(() => setPingSent(false), 2000);
+                    }}
+                    className={`flex-1 py-2.5 border rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all ${
+                      pingSent
+                        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-400'
+                        : 'bg-white/10 hover:bg-white/20 border-white/10 text-white'
+                    }`}
                   >
-                    Ping Device
+                    {pingSent ? '✓ Ping Sent!' : '📡 Ping Device'}
                   </button>
                 </div>
               </motion.div>
@@ -364,6 +389,35 @@ const MapView = () => {
         </div>
 
       </div>
+
+      {/* Incoming Ping Toast Notification */}
+      <AnimatePresence>
+        {incomingPing && (
+          <motion.div
+            initial={{ y: -80, opacity: 0, scale: 0.9 }}
+            animate={{ y: 0, opacity: 1, scale: 1 }}
+            exit={{ y: -80, opacity: 0, scale: 0.9 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+            className="absolute top-24 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-sm bg-[#1c1b1d]/95 backdrop-blur-xl border border-emerald-500/40 rounded-2xl p-4 shadow-[0_0_30px_rgba(16,185,129,0.3)] flex items-start gap-3"
+          >
+            {/* Pulsing radar icon */}
+            <div className="relative shrink-0 mt-0.5">
+              <span className="absolute inline-flex h-8 w-8 rounded-full bg-emerald-500/30 animate-ping"></span>
+              <span className="relative inline-flex h-8 w-8 rounded-full bg-emerald-500/20 border border-emerald-500/50 items-center justify-center text-base">📡</span>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] uppercase tracking-widest text-emerald-400 font-mono font-bold mb-0.5">INCOMING SIGNAL</p>
+              <p className="text-xs font-bold text-white leading-snug">{incomingPing.message}</p>
+            </div>
+            <button
+              onClick={() => setIncomingPing(null)}
+              className="shrink-0 w-5 h-5 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-gray-400 hover:text-white cursor-pointer text-[10px] font-bold transition-all"
+            >
+              ✕
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
