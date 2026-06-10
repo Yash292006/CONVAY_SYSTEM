@@ -1,281 +1,363 @@
-import React, { useEffect, useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, useRef, useCallback } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import Map, { Marker, Source, Layer } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { io } from 'socket.io-client';
-import { Navigation, Search, Crosshair, Layers, Compass, ArrowLeft } from 'lucide-react';
+import { Navigation, Search, Crosshair, Layers, Compass, ArrowLeft, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
+import axios from 'axios';
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || '';
 
 const STYLES = [
-  { name: 'Dark Mode', url: 'mapbox://styles/mapbox/dark-v11' },
+  { name: 'Dark Mode',         url: 'mapbox://styles/mapbox/dark-v11' },
   { name: 'Satellite Streets', url: 'mapbox://styles/mapbox/satellite-streets-v12' },
-  { name: 'Standard Streets', url: 'mapbox://styles/mapbox/streets-v12' }
+  { name: 'Standard Streets',  url: 'mapbox://styles/mapbox/streets-v12' }
 ];
 
-// Destination: Gokarna Beach
-const DESTINATION = { lat: 14.5479, lng: 74.3122, name: 'Gokarna Beach' };
+// ──────────────────────────────────────────────────────────────────────────────
+// Helper: call Mapbox Directions API and return { routeGeoJSON, km, eta, arrival }
+// ──────────────────────────────────────────────────────────────────────────────
+const getDirections = async (fromLng, fromLat, toLng, toLat) => {
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${fromLng},${fromLat};${toLng},${toLat}?geometries=geojson&overview=full&steps=true&access_token=${MAPBOX_TOKEN}`;
+  const res  = await fetch(url);
+  const json = await res.json();
+  if (!json.routes?.length) return null;
 
+  const route       = json.routes[0];
+  const durationSec = route.duration;
+  const distM       = route.distance;
+  const km          = (distM / 1000).toFixed(1);
+  const totalMins   = Math.round(durationSec / 60);
+  const hrs         = Math.floor(totalMins / 60);
+  const mins        = totalMins % 60;
+  const etaStr      = hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`;
+  const arrivalDate = new Date(Date.now() + durationSec * 1000);
+  const arrivalStr  = arrivalDate.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+
+  // First step instruction for next turn
+  const nextStep    = route.legs?.[0]?.steps?.[0]?.maneuver?.instruction || '';
+
+  return {
+    routeGeoJSON: { type: 'Feature', geometry: route.geometry },
+    km,
+    etaStr,
+    arrivalStr,
+    nextStep
+  };
+};
+
+// ──────────────────────────────────────────────────────────────────────────────
 const MapView = () => {
-  const navigate = useNavigate();
-  const [riders, setRiders] = useState([]);
-  const [speed, setSpeed] = useState(0);
-  const [userLocation, setUserLocation] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
+  const navigate   = useNavigate();
+  const { id: tripId } = useParams(); // /map/:id
+
+  // Core map state
+  const [riders,        setRiders]        = useState([]);
+  const [speed,         setSpeed]         = useState(0);
+  const [userLocation,  setUserLocation]  = useState(null);
+  const [searchQuery,   setSearchQuery]   = useState('');
   const [selectedRider, setSelectedRider] = useState(null);
-  const [mapStyle, setMapStyle] = useState('mapbox://styles/mapbox/dark-v11');
+  const [mapStyle,      setMapStyle]      = useState(STYLES[0].url);
+
+  // Ping
   const [incomingPing, setIncomingPing] = useState(null);
-  const [pingSent, setPingSent] = useState(false);
-  const [routeData, setRouteData] = useState(null);   // GeoJSON LineString for the route
-  const [eta, setEta] = useState(null);               // Formatted ETA string
-  const [distanceKm, setDistanceKm] = useState(null); // Distance in km
-  const [arrivalTime, setArrivalTime] = useState(null); // Arrival clock time
-  
-  const socketRef = useRef(null);
-  const mapRef = useRef(null);
-  const hasCenteredRef = useRef(false);
-  
-  // Define where the camera starts (e.g., Dharwad or center of India)
+  const [pingSent,     setPingSent]     = useState(false);
+
+  // ── Destination (loaded from backend trip)
+  const [destination, setDestination] = useState(null); // { name, lat, lng }
+
+  // ── Route to destination (blue)
+  const [destRoute,      setDestRoute]      = useState(null);
+  const [destEta,        setDestEta]        = useState(null);
+  const [destKm,         setDestKm]         = useState(null);
+  const [destArrival,    setDestArrival]    = useState(null);
+  const [destNextStep,   setDestNextStep]   = useState('');
+
+  // ── Route to selected rider (emerald)
+  const [riderRoute,     setRiderRoute]     = useState(null);
+  const [riderEta,       setRiderEta]       = useState(null);
+  const [riderKm,        setRiderKm]        = useState(null);
+  const [riderArrival,   setRiderArrival]   = useState(null);
+  const [riderNextStep,  setRiderNextStep]  = useState('');
+  const [routingToRider, setRoutingToRider] = useState(false);
+
+  // Refs
+  const socketRef          = useRef(null);
+  const mapRef             = useRef(null);
+  const hasCenteredRef     = useRef(false);
+  const lastDestFetchRef   = useRef(0);
+  const headingRef         = useRef(0); // last known bearing from GPS
+
   const [viewState, setViewState] = useState({
     longitude: 75.0078,
-    latitude: 15.4589,
-    zoom: 12,
-    pitch: 45, // Tilts the camera for a 3D view!
+    latitude:  15.4589,
+    zoom:      12,
+    pitch:     45,
+    bearing:   0,
   });
 
+  // ── 1. Load trip destination from backend ────────────────────────────────────
   useEffect(() => {
-    // 1. Connect to your radar tower
-    const backendUrl = import.meta.env.VITE_API_URL 
-      ? import.meta.env.VITE_API_URL.replace('/api', '') 
+    if (!tripId) return;
+    const load = async () => {
+      try {
+        const res = await axios.get(`/trips/${tripId}`);
+        const dest = res.data?.trip?.destination;
+        if (dest && typeof dest === 'string' && dest.trim()) {
+          // Geocode the destination name → lat/lng via Mapbox Geocoding API
+          const geoRes = await fetch(
+            `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(dest)}.json?limit=1&access_token=${MAPBOX_TOKEN}`
+          );
+          const geoJson = await geoRes.json();
+          const [lng, lat] = geoJson.features?.[0]?.center || [];
+          if (lat && lng) {
+            setDestination({ name: dest, lat, lng });
+          }
+        }
+      } catch (e) {
+        console.warn('Could not load trip destination:', e);
+      }
+    };
+    load();
+  }, [tripId]);
+
+  // ── 2. Socket + GPS ──────────────────────────────────────────────────────────
+  useEffect(() => {
+    const backendUrl = import.meta.env.VITE_API_URL
+      ? import.meta.env.VITE_API_URL.replace('/api', '')
       : 'http://localhost:5000';
     socketRef.current = io(backendUrl);
-    
-    // Join room logic...
-    const searchParams = new URLSearchParams(window.location.search);
-    const activeTripId = searchParams.get('trip') || 'demo-trip-room';
+
+    const searchParams   = new URLSearchParams(window.location.search);
+    const activeTripId   = tripId || searchParams.get('trip') || 'demo-trip-room';
     socketRef.current.emit('joinTrip', activeTripId);
 
-    socketRef.current.on('riderMoved', (incomingData) => {
+    socketRef.current.on('riderMoved', (incoming) => {
       setRiders((prev) => {
-        const exists = prev.find(r => r.userId === incomingData.userId);
-        if (exists) {
-          return prev.map(r => r.userId === incomingData.userId ? incomingData : r);
-        }
-        return [...prev, incomingData];
+        const exists = prev.find(r => r.userId === incoming.userId);
+        return exists
+          ? prev.map(r => r.userId === incoming.userId ? incoming : r)
+          : [...prev, incoming];
       });
     });
 
-    // Listen for incoming ping from another rider
     socketRef.current.on('pingReceived', (data) => {
       setIncomingPing(data);
-      // Auto-dismiss after 5 seconds
       setTimeout(() => setIncomingPing(null), 5000);
     });
 
-    // 2. Real GPS Tracking
+    // GPS watch
+    let watchId = null;
     if (navigator.geolocation) {
-      const watchId = navigator.geolocation.watchPosition(
-        (position) => {
-          const { latitude, longitude, speed: gpsSpeed } = position.coords;
-          const currentSpeedKmH = gpsSpeed ? Math.round(gpsSpeed * 3.6) : 0;
-          setSpeed(currentSpeedKmH);
+      watchId = navigator.geolocation.watchPosition(
+        (pos) => {
+          const { latitude, longitude, speed: gpsSpeed, heading } = pos.coords;
+          const kmH = gpsSpeed ? Math.round(gpsSpeed * 3.6) : 0;
+          setSpeed(kmH);
           setUserLocation({ latitude, longitude });
+          if (heading !== null) headingRef.current = heading;
 
-          // Automatically center the map on YOUR location as you drive (only on first lock)
           if (!hasCenteredRef.current) {
             setViewState(prev => ({ ...prev, latitude, longitude }));
             hasCenteredRef.current = true;
           }
 
-          // Fetch/refresh route to destination
-          maybeRefetchRoute(latitude, longitude);
+          // Refresh destination route every 2 min
+          const now = Date.now();
+          if (now - lastDestFetchRef.current > 120_000) {
+            lastDestFetchRef.current = now;
+            // will be called in separate effect once destination is set
+            refreshDestRoute(latitude, longitude);
+          }
 
           const activeUser = JSON.parse(localStorage.getItem('convoyUser'));
           if (activeUser) {
             socketRef.current.emit('updateLocation', {
               tripId: activeTripId,
               userId: activeUser.id,
-              name: activeUser.name,
-              lat: latitude,
-              lng: longitude,
-              speed: currentSpeedKmH
+              name:   activeUser.name,
+              lat:    latitude,
+              lng:    longitude,
+              speed:  kmH
             });
           }
         },
         (err) => console.error(err),
         { enableHighAccuracy: true }
       );
-      return () => navigator.geolocation.clearWatch(watchId);
     }
+
+    return () => {
+      socketRef.current?.disconnect();
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId);
+    };
   }, []);
 
-  // Fetch live route from Mapbox Directions API
-  const fetchRoute = async (userLat, userLng) => {
-    if (!MAPBOX_TOKEN) return;
+  // ── 3. Fetch destination route whenever destination or userLocation set ───────
+  const refreshDestRoute = useCallback(async (lat, lng) => {
+    if (!destination || !lat || !lng) return;
     try {
-      const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${userLng},${userLat};${DESTINATION.lng},${DESTINATION.lat}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
-      const res = await fetch(url);
-      const json = await res.json();
-      if (!json.routes || json.routes.length === 0) return;
+      const result = await getDirections(lng, lat, destination.lng, destination.lat);
+      if (result) {
+        setDestRoute(result.routeGeoJSON);
+        setDestEta(result.etaStr);
+        setDestKm(result.km);
+        setDestArrival(result.arrivalStr);
+        setDestNextStep(result.nextStep);
+      }
+    } catch (e) { console.error(e); }
+  }, [destination]);
 
-      const route = json.routes[0];
-      const durationSecs = route.duration; // seconds
-      const distMeters = route.distance;   // meters
-
-      // Build GeoJSON for the route line
-      setRouteData({
-        type: 'Feature',
-        geometry: route.geometry
-      });
-
-      // Format distance
-      const km = (distMeters / 1000).toFixed(1);
-      setDistanceKm(km);
-
-      // Format ETA duration (e.g. "2h 15m" or "45m")
-      const totalMins = Math.round(durationSecs / 60);
-      const hrs = Math.floor(totalMins / 60);
-      const mins = totalMins % 60;
-      setEta(hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`);
-
-      // Format arrival clock time
-      const arrival = new Date(Date.now() + durationSecs * 1000);
-      setArrivalTime(arrival.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
-    } catch (err) {
-      console.error('Route fetch failed:', err);
+  useEffect(() => {
+    if (destination && userLocation) {
+      refreshDestRoute(userLocation.latitude, userLocation.longitude);
     }
-  };
+  }, [destination, userLocation?.latitude, userLocation?.longitude, refreshDestRoute]);
 
-  // Fetch route when user location is first acquired, then every 2 mins
-  const lastRouteFetchRef = useRef(0);
-  const maybeRefetchRoute = (lat, lng) => {
-    const now = Date.now();
-    if (now - lastRouteFetchRef.current > 120_000) {
-      lastRouteFetchRef.current = now;
-      fetchRoute(lat, lng);
-    }
-  };
-
-  // Recenter map on user's current GPS location
+  // ── 4. RECENTER in navigation mode (zoom 17, pitch 60, bearing = GPS heading) ─
   const recenterOnUser = () => {
     const loc = userLocation || { latitude: 15.4589, longitude: 75.0078 };
     mapRef.current?.flyTo({
-      center: [loc.longitude, loc.latitude],
-      zoom: 14,
-      pitch: 45,
-      bearing: 0,
-      duration: 1500
+      center:   [loc.longitude, loc.latitude],
+      zoom:     17,
+      pitch:    60,
+      bearing:  headingRef.current || 0,
+      duration: 1500,
     });
   };
 
-  // Toggle map base layer styles
+  // ── 5. Route to a rider ───────────────────────────────────────────────────────
+  const routeToRider = async (rider) => {
+    if (!userLocation) return;
+    setRoutingToRider(true);
+    setRiderRoute(null);
+    setRiderEta(null);
+    try {
+      const result = await getDirections(
+        userLocation.longitude, userLocation.latitude,
+        rider.lng, rider.lat
+      );
+      if (result) {
+        setRiderRoute(result.routeGeoJSON);
+        setRiderEta(result.etaStr);
+        setRiderKm(result.km);
+        setRiderArrival(result.arrivalStr);
+        setRiderNextStep(result.nextStep);
+      }
+    } catch (e) { console.error(e); }
+    setRoutingToRider(false);
+  };
+
+  // When selecting a rider: open drawer + fetch route to them
+  const handleSelectRider = (rider) => {
+    setSelectedRider(rider);
+    mapRef.current?.flyTo({ center: [rider.lng, rider.lat], zoom: 15, duration: 1500 });
+    routeToRider(rider);
+  };
+
+  // Clear rider selection + rider route
+  const clearRider = () => {
+    setSelectedRider(null);
+    setRiderRoute(null);
+    setRiderEta(null);
+    setRiderKm(null);
+    setRiderArrival(null);
+    setRiderNextStep('');
+  };
+
+  // ── Helpers ──────────────────────────────────────────────────────────────────
   const cycleMapStyle = () => {
     const idx = STYLES.findIndex(s => s.url === mapStyle);
-    const nextIdx = (idx + 1) % STYLES.length;
-    setMapStyle(STYLES[nextIdx].url);
+    setMapStyle(STYLES[(idx + 1) % STYLES.length].url);
   };
 
-  // Reset compass orientation to north
   const resetCompass = () => {
-    setViewState(prev => ({
-      ...prev,
-      bearing: 0,
-      pitch: 0
-    }));
+    setViewState(prev => ({ ...prev, bearing: 0, pitch: 0 }));
   };
 
-  // Filter riders based on search text input
   const filteredRiders = searchQuery.trim() === ''
     ? []
     : riders.filter(r => r.name?.toLowerCase().includes(searchQuery.toLowerCase()));
 
   const currentStyleName = STYLES.find(s => s.url === mapStyle)?.name || 'Map Style';
 
+  // Active next turn: rider route overrides destination route when a rider is selected
+  const activeNextStep = selectedRider ? riderNextStep : destNextStep;
+
+  // ── Render ───────────────────────────────────────────────────────────────────
   return (
     <div className="w-full h-screen relative bg-[#131315] select-none text-[#e5e1e4] overflow-hidden">
-      
+
       <Map
         ref={mapRef}
         {...viewState}
         onMove={evt => setViewState(evt.viewState)}
-        mapStyle={mapStyle} 
+        mapStyle={mapStyle}
         mapboxAccessToken={MAPBOX_TOKEN}
       >
-        {/* Route line from user to destination */}
-        {routeData && (
-          <Source id="route" type="geojson" data={routeData}>
-            {/* Glowing outer line */}
-            <Layer
-              id="route-glow"
-              type="line"
-              paint={{
-                'line-color': '#3b82f6',
-                'line-width': 10,
-                'line-opacity': 0.2,
-                'line-blur': 4
-              }}
+        {/* ── DESTINATION route (blue) — only when trip has a destination ── */}
+        {destRoute && !selectedRider && (
+          <Source id="dest-route" type="geojson" data={destRoute}>
+            <Layer id="dest-route-glow" type="line"
+              paint={{ 'line-color': '#3b82f6', 'line-width': 10, 'line-opacity': 0.18, 'line-blur': 4 }}
               layout={{ 'line-join': 'round', 'line-cap': 'round' }}
             />
-            {/* Solid inner line */}
-            <Layer
-              id="route-line"
-              type="line"
-              paint={{
-                'line-color': '#60a5fa',
-                'line-width': 4,
-                'line-opacity': 0.95,
-                'line-dasharray': [1, 0]
-              }}
+            <Layer id="dest-route-line" type="line"
+              paint={{ 'line-color': '#60a5fa', 'line-width': 4, 'line-opacity': 0.95 }}
               layout={{ 'line-join': 'round', 'line-cap': 'round' }}
             />
           </Source>
         )}
 
-        {/* Destination pin marker */}
-        <Marker longitude={DESTINATION.lng} latitude={DESTINATION.lat} anchor="bottom">
-          <div className="flex flex-col items-center">
-            <div className="w-8 h-8 rounded-full bg-red-500/20 border-2 border-red-400 flex items-center justify-center shadow-[0_0_15px_rgba(239,68,68,0.6)] animate-pulse">
-              <span className="text-sm">📍</span>
-            </div>
-            <div className="mt-1 bg-[#1c1b1d]/90 backdrop-blur-md px-2 py-0.5 rounded-lg border border-red-500/20 text-[9px] font-bold text-red-300 whitespace-nowrap">
-              {DESTINATION.name}
-            </div>
-          </div>
-        </Marker>
+        {/* ── RIDER route (emerald) — shown while a rider is selected ── */}
+        {riderRoute && (
+          <Source id="rider-route" type="geojson" data={riderRoute}>
+            <Layer id="rider-route-glow" type="line"
+              paint={{ 'line-color': '#10b981', 'line-width': 10, 'line-opacity': 0.18, 'line-blur': 4 }}
+              layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+            />
+            <Layer id="rider-route-line" type="line"
+              paint={{ 'line-color': '#34d399', 'line-width': 4, 'line-opacity': 0.95 }}
+              layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+            />
+          </Source>
+        )}
 
-        {/* User's own GPS marker */}
-        {userLocation && (
-          <Marker 
-            longitude={userLocation.longitude} 
-            latitude={userLocation.latitude} 
-            anchor="center"
-          >
-            <div className="relative flex justify-center items-center">
-              <span className="absolute inline-flex h-8 w-8 rounded-full bg-emerald-500/30 animate-ping"></span>
-              <span className="relative inline-flex rounded-full h-4.5 w-4.5 bg-emerald-400 border-2 border-white shadow-[0_0_10px_#10b981]"></span>
+        {/* ── DESTINATION pin — only when destination loaded ── */}
+        {destination && (
+          <Marker longitude={destination.lng} latitude={destination.lat} anchor="bottom">
+            <div className="flex flex-col items-center">
+              <div className="w-8 h-8 rounded-full bg-red-500/20 border-2 border-red-400 flex items-center justify-center shadow-[0_0_15px_rgba(239,68,68,0.6)] animate-pulse">
+                <span className="text-sm">📍</span>
+              </div>
+              <div className="mt-1 bg-[#1c1b1d]/90 backdrop-blur-md px-2 py-0.5 rounded-lg border border-red-500/20 text-[9px] font-bold text-red-300 whitespace-nowrap">
+                {destination.name}
+              </div>
             </div>
           </Marker>
         )}
 
-        {/* Render real-time markers for every rider on actual roads */}
+        {/* ── USER GPS marker ── */}
+        {userLocation && (
+          <Marker longitude={userLocation.longitude} latitude={userLocation.latitude} anchor="center">
+            <div className="relative flex justify-center items-center">
+              <span className="absolute inline-flex h-8 w-8 rounded-full bg-emerald-500/30 animate-ping" />
+              <span className="relative inline-flex rounded-full h-4 w-4 bg-emerald-400 border-2 border-white shadow-[0_0_10px_#10b981]" />
+            </div>
+          </Marker>
+        )}
+
+        {/* ── RIDER markers ── */}
         {riders.map((rider) => (
-          <Marker 
-            key={rider.userId} 
-            longitude={rider.lng} 
-            latitude={rider.lat} 
-            anchor="bottom"
-          >
-            <div 
-              onClick={() => {
-                setSelectedRider(rider);
-                mapRef.current?.flyTo({ center: [rider.lng, rider.lat], zoom: 14, duration: 1500 });
-              }}
+          <Marker key={rider.userId} longitude={rider.lng} latitude={rider.lat} anchor="bottom">
+            <div
+              onClick={() => handleSelectRider(rider)}
               className="flex flex-col items-center cursor-pointer pointer-events-auto group"
             >
               <div className="relative flex justify-center items-center">
                 <div className="absolute w-8 h-8 bg-[#3b82f6]/40 rounded-full animate-ping group-hover:bg-[#3b82f6]/60 transition-all" />
-                <div className="relative w-4 h-4 bg-white border-2 border-[#3b82f6] rounded-full shadow-[0_0_15px_rgba(59,130,246,0.8)]" />
+                <div className={`relative w-4 h-4 border-2 rounded-full shadow-[0_0_15px_rgba(59,130,246,0.8)] transition-all ${selectedRider?.userId === rider.userId ? 'bg-emerald-400 border-emerald-300' : 'bg-white border-[#3b82f6]'}`} />
               </div>
               <div className="mt-2 bg-[#1c1b1d]/85 backdrop-blur-md px-2 py-1 rounded-lg border border-white/10 text-[10px] font-bold text-white whitespace-nowrap shadow-lg">
                 {rider.name} • {rider.speed} km/h
@@ -285,8 +367,8 @@ const MapView = () => {
         ))}
       </Map>
 
-      {/* Floating Back Button */}
-      <button 
+      {/* ── BACK BUTTON ── */}
+      <button
         onClick={() => navigate('/')}
         className="absolute top-6 left-6 z-30 pointer-events-auto w-10 h-10 rounded-full flex items-center justify-center bg-[#201f22]/60 backdrop-blur-md border border-white/10 hover:border-white/25 text-white active:scale-95 transition-all cursor-pointer shadow-lg"
         title="Back to Dashboard"
@@ -294,28 +376,45 @@ const MapView = () => {
         <ArrowLeft size={18} />
       </button>
 
-      {/* --- HUD OVERLAY --- */}
+      {/* ── NEXT TURN BANNER (like Google Maps) ── */}
+      <AnimatePresence>
+        {activeNextStep && (
+          <motion.div
+            key="next-turn"
+            initial={{ y: -60, opacity: 0 }}
+            animate={{ y: 0, opacity: 1 }}
+            exit={{ y: -60, opacity: 0 }}
+            transition={{ type: 'spring', stiffness: 300, damping: 28 }}
+            className="absolute top-20 left-1/2 -translate-x-1/2 z-40 flex items-center gap-3 bg-[#1c1b1d]/95 backdrop-blur-xl border border-white/10 rounded-2xl px-5 py-3 shadow-2xl max-w-xs w-[90%]"
+          >
+            <div className={`w-8 h-8 rounded-full flex items-center justify-center text-sm shrink-0 ${selectedRider ? 'bg-emerald-500/20 border border-emerald-500/40' : 'bg-[#3b82f6]/20 border border-[#3b82f6]/40'}`}>
+              ↗
+            </div>
+            <p className="text-xs font-semibold text-white leading-snug line-clamp-2">{activeNextStep}</p>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── HUD OVERLAY ── */}
       <div className="absolute inset-0 z-10 pointer-events-none p-4 flex flex-col justify-between pb-28">
-        
-        {/* Top Search Bar */}
+
+        {/* Search bar */}
         <div className="pointer-events-auto w-full max-w-md mx-auto mt-safe pt-4 pl-12 relative">
           <div className="relative group">
             <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
               <Search className="h-5 w-5 text-[#8c909f]" />
             </div>
-            <label htmlFor="map-search" className="sr-only">Search route or rider</label>
-            <input 
-              type="text" 
+            <label htmlFor="map-search" className="sr-only">Search rider</label>
+            <input
+              type="text"
               id="map-search"
-              name="search"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search rider..." 
+              placeholder="Search rider..."
               className="w-full bg-[#201f22]/60 backdrop-blur-xl border border-white/10 rounded-2xl py-3.5 pl-12 pr-4 text-white placeholder-[#8c909f] shadow-lg focus:outline-none focus:ring-2 focus:ring-[#3b82f6]/50 transition-all text-sm outline-none"
             />
           </div>
 
-          {/* Search Dropdown Panel */}
           <AnimatePresence>
             {searchQuery.trim() !== '' && (
               <motion.div
@@ -330,14 +429,10 @@ const MapView = () => {
                   filteredRiders.map((r) => (
                     <button
                       key={r.userId}
-                      onClick={() => {
-                        setSearchQuery('');
-                        setSelectedRider(r);
-                        mapRef.current?.flyTo({ center: [r.lng, r.lat], zoom: 14, duration: 1500 });
-                      }}
+                      onClick={() => { setSearchQuery(''); handleSelectRider(r); }}
                       className="flex justify-between items-center px-4 py-3 hover:bg-[#3b82f6]/20 active:bg-[#3b82f6]/30 rounded-xl cursor-pointer text-left text-xs text-white font-medium transition-colors border border-transparent hover:border-white/5"
                     >
-                      <span className="font-bold text-white">{r.name}</span>
+                      <span className="font-bold">{r.name}</span>
                       <span className="text-[#3b82f6] font-mono bg-[#3b82f6]/10 px-2 py-0.5 rounded border border-[#3b82f6]/20">{r.speed} km/h</span>
                     </button>
                   ))
@@ -347,26 +442,26 @@ const MapView = () => {
           </AnimatePresence>
         </div>
 
-        {/* Middle Section: Right Action Buttons */}
+        {/* Right-side controls */}
         <div className="absolute right-4 top-1/3 flex flex-col gap-4 pointer-events-auto">
-          <button 
+          <button
             onClick={recenterOnUser}
             className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md border cursor-pointer active:scale-90 transition-all bg-[#201f22]/60 border-white/10 text-white/70 hover:text-white hover:border-white/30"
-            title="Recenter on My Location"
+            title="Navigation Mode"
           >
             <Crosshair size={20} />
           </button>
-          
-          <button 
+
+          <button
             onClick={cycleMapStyle}
-            className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md border cursor-pointer active:scale-90 transition-all bg-[#201f22]/60 border-white/10 text-white/70 hover:text-white hover:border-white/30 flex-col gap-0.5"
-            title={`Toggle Layer: Current (${currentStyleName})`}
+            className="w-12 h-12 rounded-full flex flex-col items-center justify-center backdrop-blur-md border cursor-pointer active:scale-90 transition-all bg-[#201f22]/60 border-white/10 text-white/70 hover:text-white hover:border-white/30 gap-0.5"
+            title={`Layer: ${currentStyleName}`}
           >
             <Layers size={20} />
             <span className="text-[7px] font-bold text-blue-400 leading-none">LAY</span>
           </button>
 
-          <button 
+          <button
             onClick={resetCompass}
             className="w-12 h-12 rounded-full flex items-center justify-center backdrop-blur-md border cursor-pointer active:scale-90 transition-all bg-[#201f22]/60 border-white/10 text-white/70 hover:text-white hover:border-white/30"
             title="Reset Compass (North)"
@@ -375,11 +470,11 @@ const MapView = () => {
           </button>
         </div>
 
-        {/* Sliding Bottom HUD Panels */}
+        {/* ── BOTTOM HUD ── */}
         <div className="pointer-events-auto w-full max-w-md mx-auto mb-2 relative min-h-[96px] flex items-end">
           <AnimatePresence mode="wait">
-            
-            {/* Case A: Selected Rider Details Drawer */}
+
+            {/* A: Selected Rider Drawer */}
             {selectedRider ? (
               <motion.div
                 key="rider-drawer"
@@ -389,56 +484,64 @@ const MapView = () => {
                 transition={{ duration: 0.25 }}
                 className="w-full bg-[#1c1b1d]/95 backdrop-blur-xl border border-white/15 p-5 rounded-2xl shadow-2xl flex flex-col gap-4 text-white relative overflow-hidden"
               >
-                {/* Edge accent */}
-                <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-[#3b82f6] to-transparent" />
-                
-                {/* Header info */}
+                <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-emerald-500 to-transparent" />
+
+                {/* Header */}
                 <div className="flex justify-between items-start">
                   <div className="flex items-center gap-3">
-                    <div className="h-10 w-10 rounded-full border border-[#3b82f6]/30 bg-[#3b82f6]/10 flex items-center justify-center font-bold text-[#3b82f6] text-sm">
+                    <div className="h-10 w-10 rounded-full border border-emerald-500/30 bg-emerald-500/10 flex items-center justify-center font-bold text-emerald-400 text-sm">
                       {selectedRider.name?.substring(0, 2).toUpperCase() || 'RM'}
                     </div>
                     <div>
                       <h3 className="font-bold text-sm text-white">{selectedRider.name}</h3>
-                      <p className="text-[8px] font-mono text-gray-400 uppercase tracking-widest">Active Crew Member</p>
+                      <p className="text-[8px] font-mono text-gray-400 uppercase tracking-widest">
+                        {routingToRider ? '⏳ Calculating route...' : riderEta ? `${riderKm} km • Arrive ${riderArrival}` : 'Active Crew Member'}
+                      </p>
                     </div>
                   </div>
                   <button
-                    onClick={() => setSelectedRider(null)}
+                    onClick={clearRider}
                     className="w-6 h-6 rounded-full bg-white/10 hover:bg-white/20 flex items-center justify-center text-gray-300 hover:text-white transition-all cursor-pointer font-bold text-[10px]"
-                    title="Close Details"
                   >
                     ✕
                   </button>
                 </div>
 
-                {/* Specs Grid */}
+                {/* Stats */}
                 <div className="grid grid-cols-2 gap-3">
                   <div className="bg-[#201f22]/60 border border-white/5 p-3 rounded-xl flex flex-col gap-1">
                     <span className="text-[8px] uppercase tracking-wider text-gray-400 font-mono">TELEMETRY</span>
-                    <span className="text-xl font-black text-[#3b82f6] font-sans">{selectedRider.speed} <span className="text-xs font-bold text-gray-400">km/h</span></span>
+                    <span className="text-xl font-black text-emerald-400 font-sans">{selectedRider.speed} <span className="text-xs font-bold text-gray-400">km/h</span></span>
                   </div>
-                  <div className="bg-[#201f22]/60 border border-white/5 p-3 rounded-xl flex flex-col gap-1 overflow-hidden">
-                    <span className="text-[8px] uppercase tracking-wider text-gray-400 font-mono">GPS COORDINATES</span>
-                    <span className="text-[9px] font-bold text-white font-mono truncate">{selectedRider.lat?.toFixed(5)}, {selectedRider.lng?.toFixed(5)}</span>
+                  <div className="bg-[#201f22]/60 border border-white/5 p-3 rounded-xl flex flex-col gap-1">
+                    <span className="text-[8px] uppercase tracking-wider text-gray-400 font-mono">
+                      {riderEta ? 'ETA' : 'GPS COORDS'}
+                    </span>
+                    {riderEta ? (
+                      <span className="text-xl font-black text-emerald-400">{riderEta}</span>
+                    ) : (
+                      <span className="text-[9px] font-bold text-white font-mono truncate">
+                        {selectedRider.lat?.toFixed(5)}, {selectedRider.lng?.toFixed(5)}
+                      </span>
+                    )}
                   </div>
                 </div>
 
-                {/* Drawer Action Triggers */}
+                {/* Actions */}
                 <div className="flex gap-2.5">
                   <button
-                    onClick={() => mapRef.current?.flyTo({ center: [selectedRider.lng, selectedRider.lat], zoom: 15, duration: 1200 })}
-                    className="flex-1 py-2.5 bg-[#3b82f6] hover:bg-[#3b82f6]/95 text-black hover:text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)]"
+                    onClick={() => routeToRider(selectedRider)}
+                    className="flex-1 py-2.5 bg-emerald-500/20 hover:bg-emerald-500/30 border border-emerald-500/40 text-emerald-400 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 cursor-pointer active:scale-95 transition-all"
                   >
-                    <Compass size={14} /> Center Map
+                    <Navigation size={13} /> Navigate to Rider
                   </button>
                   <button
                     onClick={() => {
                       const activeUser = JSON.parse(localStorage.getItem('convoyUser'));
                       const searchParams = new URLSearchParams(window.location.search);
-                      const tripId = searchParams.get('trip') || 'demo-trip-room';
+                      const tId = tripId || searchParams.get('trip') || 'demo-trip-room';
                       socketRef.current?.emit('pingRider', {
-                        tripId,
+                        tripId: tId,
                         targetUserId: selectedRider.userId,
                         fromName: activeUser?.name || 'Your teammate',
                         message: `🏍️ ${activeUser?.name || 'A rider'} is calling you on the radar!`
@@ -456,9 +559,10 @@ const MapView = () => {
                   </button>
                 </div>
               </motion.div>
+
             ) : (
-              /* Case B: Main Telemetry HUD */
-              <motion.div 
+              /* B: Main Telemetry HUD */
+              <motion.div
                 key="telemetry-hud"
                 initial={{ y: 50, opacity: 0 }}
                 animate={{ y: 0, opacity: 1 }}
@@ -466,28 +570,36 @@ const MapView = () => {
                 transition={{ duration: 0.25 }}
                 className="w-full bg-[#201f22]/80 backdrop-blur-xl border border-white/10 p-4 rounded-2xl shadow-2xl relative overflow-hidden flex justify-between items-center text-white"
               >
-                {/* Glass edge highlight */}
                 <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-[#3b82f6]/50 to-transparent" />
-                
+
                 <div>
                   <p className="text-[10px] uppercase tracking-[0.2em] text-[#8c909f] mb-1">TELEMETRY</p>
                   <p className="text-3xl font-black text-white">{speed} <span className="text-sm font-bold text-[#3b82f6]">km/h</span></p>
                 </div>
 
                 <div className="text-right flex flex-col items-end gap-1.5">
-                  <div className="flex items-center gap-2 bg-[#3b82f6]/10 px-3 py-1.5 rounded-lg border border-[#3b82f6]/20">
-                    <Navigation size={13} className="text-[#3b82f6] transform rotate-45 animate-pulse shrink-0" />
-                    <span className="text-xs font-bold text-white">{DESTINATION.name}</span>
-                  </div>
-                  {eta ? (
-                    <div className="text-right">
-                      <p className="text-[18px] font-black text-[#3b82f6] leading-none">{eta}</p>
-                      <p className="text-[9px] text-gray-400 font-mono mt-0.5">
-                        {distanceKm} km · Arrive {arrivalTime}
-                      </p>
-                    </div>
+                  {destination ? (
+                    <>
+                      <div className="flex items-center gap-2 bg-[#3b82f6]/10 px-3 py-1.5 rounded-lg border border-[#3b82f6]/20">
+                        <Navigation size={13} className="text-[#3b82f6] transform rotate-45 animate-pulse shrink-0" />
+                        <span className="text-xs font-bold text-white truncate max-w-[120px]">{destination.name}</span>
+                      </div>
+                      {destEta ? (
+                        <div className="text-right">
+                          <p className="text-[18px] font-black text-[#3b82f6] leading-none">{destEta}</p>
+                          <p className="text-[9px] text-gray-400 font-mono mt-0.5">
+                            {destKm} km · Arrive {destArrival}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className="text-[9px] text-gray-500 font-mono animate-pulse">Calculating route...</p>
+                      )}
+                    </>
                   ) : (
-                    <p className="text-[9px] text-gray-500 font-mono animate-pulse">Calculating route...</p>
+                    <div className="flex items-center gap-2 bg-white/5 px-3 py-1.5 rounded-lg border border-white/10">
+                      <Navigation size={13} className="text-gray-500 shrink-0" />
+                      <span className="text-xs text-gray-500">No destination set</span>
+                    </div>
                   )}
                 </div>
               </motion.div>
@@ -495,10 +607,9 @@ const MapView = () => {
 
           </AnimatePresence>
         </div>
-
       </div>
 
-      {/* Incoming Ping Toast Notification */}
+      {/* ── INCOMING PING TOAST ── */}
       <AnimatePresence>
         {incomingPing && (
           <motion.div
@@ -508,9 +619,8 @@ const MapView = () => {
             transition={{ type: 'spring', stiffness: 400, damping: 28 }}
             className="absolute top-24 left-1/2 -translate-x-1/2 z-50 w-[90%] max-w-sm bg-[#1c1b1d]/95 backdrop-blur-xl border border-emerald-500/40 rounded-2xl p-4 shadow-[0_0_30px_rgba(16,185,129,0.3)] flex items-start gap-3"
           >
-            {/* Pulsing radar icon */}
             <div className="relative shrink-0 mt-0.5">
-              <span className="absolute inline-flex h-8 w-8 rounded-full bg-emerald-500/30 animate-ping"></span>
+              <span className="absolute inline-flex h-8 w-8 rounded-full bg-emerald-500/30 animate-ping" />
               <span className="relative inline-flex h-8 w-8 rounded-full bg-emerald-500/20 border border-emerald-500/50 items-center justify-center text-base">📡</span>
             </div>
             <div className="flex-1 min-w-0">
