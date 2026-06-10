@@ -23,7 +23,10 @@ const MapView = () => {
 
   useEffect(() => {
     // 1. Connect to your radar tower
-    socketRef.current = io('http://localhost:5000');
+    const backendUrl = import.meta.env.VITE_API_URL 
+      ? import.meta.env.VITE_API_URL.replace('/api', '') 
+      : 'http://localhost:5000';
+    socketRef.current = io(backendUrl);
     
     // Join room logic...
     const searchParams = new URLSearchParams(window.location.search);

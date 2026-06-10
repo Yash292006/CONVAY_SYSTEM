@@ -14,7 +14,7 @@ import LedgerView from './views/LedgerView';
 import BottomNav from './components/BottomNav';
 
 // Configure Axios Defaults
-axios.defaults.baseURL = 'http://localhost:5000/api';
+axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
 
 // Global response interceptor to handle token expiration (401 Unauthorized)
 axios.interceptors.response.use(
