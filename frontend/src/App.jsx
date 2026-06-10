@@ -18,8 +18,8 @@ import BottomNav from './components/BottomNav';
 const getBaseURL = () => {
   let url = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
   if (Capacitor.isNativePlatform()) {
-    // 10.0.2.2 connects Android Emulator to host computer's localhost port
-    const currentIP = '10.0.2.2';
+    // 10.17.207.109 is the computer's current local Wi-Fi IP for physical device testing
+    const currentIP = '10.17.207.109';
     if (url.includes('localhost') || url.includes('127.0.0.1')) {
       url = url.replace('localhost', currentIP).replace('127.0.0.1', currentIP);
     }
@@ -27,8 +27,9 @@ const getBaseURL = () => {
   return url;
 };
 
-
 axios.defaults.baseURL = getBaseURL();
+axios.defaults.timeout = 10000; // 10 seconds timeout for request failure
+
 
 
 // Global response interceptor to handle token expiration (401 Unauthorized)

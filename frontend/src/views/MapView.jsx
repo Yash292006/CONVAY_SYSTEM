@@ -130,13 +130,14 @@ const MapView = () => {
       ? import.meta.env.VITE_API_URL.replace('/api', '')
       : 'http://localhost:5000';
     if (Capacitor.isNativePlatform()) {
-      const currentIP = '10.0.2.2';
+      const currentIP = '10.17.207.109';
       if (backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) {
         backendUrl = backendUrl.replace('localhost', currentIP).replace('127.0.0.1', currentIP);
       }
     }
 
-    socketRef.current = io(backendUrl);
+    socketRef.current = io(backendUrl, { timeout: 10000 });
+
 
 
     const searchParams   = new URLSearchParams(window.location.search);
