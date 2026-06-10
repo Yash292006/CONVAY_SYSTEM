@@ -1,5 +1,10 @@
 {
   "appId": "com.convoy.coordinator",
   "appName": "The Convoy",
-  "webDir": "dist"
+  "webDir": "dist",
+  "plugins": {
+    "CapacitorHttp": {
+      "enabled": true
+    }
+  }
 }
