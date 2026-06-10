@@ -6,6 +6,8 @@ import { io } from 'socket.io-client';
 import { Navigation, Search, Crosshair, Layers, Compass, ArrowLeft, X } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
+import { Capacitor } from '@capacitor/core';
+
 
 const MAPBOX_TOKEN = import.meta.env.VITE_MAPBOX_TOKEN || '';
 
@@ -124,10 +126,16 @@ const MapView = () => {
 
   // ── 2. Socket + GPS ──────────────────────────────────────────────────────────
   useEffect(() => {
-    const backendUrl = import.meta.env.VITE_API_URL
+    let backendUrl = import.meta.env.VITE_API_URL
       ? import.meta.env.VITE_API_URL.replace('/api', '')
       : 'http://localhost:5000';
+    if (Capacitor.isNativePlatform()) {
+      if (backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) {
+        backendUrl = backendUrl.replace('localhost', '10.0.2.2').replace('127.0.0.1', '10.0.2.2');
+      }
+    }
     socketRef.current = io(backendUrl);
+
 
     const searchParams   = new URLSearchParams(window.location.search);
     const activeTripId   = tripId || searchParams.get('trip') || 'demo-trip-room';

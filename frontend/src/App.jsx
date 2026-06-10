@@ -1,6 +1,7 @@
 import React, { createContext, useState, useEffect, useContext } from 'react';
 import { BrowserRouter as Router, Routes, Route, Navigate, useLocation, useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { Capacitor } from '@capacitor/core';
 
 // Import Views
 import LoginView from './views/LoginView';
@@ -14,7 +15,18 @@ import LedgerView from './views/LedgerView';
 import BottomNav from './components/BottomNav';
 
 // Configure Axios Defaults
-axios.defaults.baseURL = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+const getBaseURL = () => {
+  let url = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+  if (Capacitor.isNativePlatform()) {
+    if (url.includes('localhost') || url.includes('127.0.0.1')) {
+      url = url.replace('localhost', '10.0.2.2').replace('127.0.0.1', '10.0.2.2');
+    }
+  }
+  return url;
+};
+
+axios.defaults.baseURL = getBaseURL();
+
 
 // Global response interceptor to handle token expiration (401 Unauthorized)
 axios.interceptors.response.use(

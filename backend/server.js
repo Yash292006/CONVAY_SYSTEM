@@ -17,10 +17,36 @@ connectDB();
 const app = express();
 
 // Middleware
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5000',
+  'https://localhost',
+  'http://localhost',
+  'capacitor://localhost'
+];
+
 app.use(cors({
-  origin: 'http://localhost:5173', // Your Vite React port
+  origin: function (origin, callback) {
+    // allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    
+    const isAllowed = allowedOrigins.indexOf(origin) !== -1 ||
+                      origin.startsWith('capacitor://') ||
+                      origin.startsWith('http://localhost') ||
+                      origin.startsWith('https://localhost') ||
+                      origin.includes('10.0.2.2') ||
+                      origin.includes('192.168.');
+
+    if (isAllowed) {
+      return callback(null, true);
+    } else {
+      var msg = 'The CORS policy for this site does not allow access from ' + origin;
+      return callback(new Error(msg), false);
+    }
+  },
   credentials: true
 }));
+
 app.use(express.json()); // Allows us to read JSON data from the frontend
 
 // API Routes
@@ -49,10 +75,24 @@ const PORT = process.env.PORT || 5000;
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: 'http://localhost:5173',
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true);
+      const isAllowed = allowedOrigins.indexOf(origin) !== -1 ||
+                        origin.startsWith('capacitor://') ||
+                        origin.startsWith('http://localhost') ||
+                        origin.startsWith('https://localhost') ||
+                        origin.includes('10.0.2.2') ||
+                        origin.includes('192.168.');
+      if (isAllowed) {
+        return callback(null, true);
+      } else {
+        return callback(new Error('Not allowed by CORS'), false);
+      }
+    },
     methods: ["GET", "POST"]
   }
 });
+
 
 // The Radar Tower: Upgraded with Private Rooms
 io.on('connection', (socket) => {
