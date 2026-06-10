@@ -1,32 +1,36 @@
-import React, { useState, useEffect, useRef, useContext } from 'react';
+import React, { useState, useEffect, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
-import * as THREE from 'three';
 import { AuthContext } from '../App';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, MapPin, Users, Calendar, Compass, Activity, ArrowRight, LogOut } from 'lucide-react';
+import { Plus, MapPin, Users, Calendar, ArrowRight, LogOut, Bike, Activity, CheckCircle2 } from 'lucide-react';
+
+const STATUS_COLOR = {
+  planning:  'text-yellow-400 bg-yellow-400/10 border-yellow-400/25',
+  active:    'text-emerald-400 bg-emerald-400/10 border-emerald-400/25',
+  completed: 'text-blue-400   bg-blue-400/10   border-blue-400/25',
+};
 
 const DashboardView = () => {
   const { user, logout } = useContext(AuthContext);
-  const [trips, setTrips] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+
+  const [trips,           setTrips]           = useState([]);
+  const [loading,         setLoading]         = useState(true);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  
-  // Form State
-  const [title, setTitle] = useState('');
-  const [origin, setOrigin] = useState('');
+  const [filterStatus,    setFilterStatus]    = useState('all');
+
+  // Create form
+  const [title,       setTitle]       = useState('');
+  const [origin,      setOrigin]      = useState('');
   const [destination, setDestination] = useState('');
   const [description, setDescription] = useState('');
-  const [startDate, setStartDate] = useState('');
-  const [formError, setFormError] = useState('');
+  const [startDate,   setStartDate]   = useState('');
+  const [distanceKm,  setDistanceKm]  = useState('');
+  const [formError,   setFormError]   = useState('');
   const [loadingForm, setLoadingForm] = useState(false);
 
-  const navigate = useNavigate();
-  const threeContainerRef = useRef(null);
-
-  useEffect(() => {
-    fetchTrips();
-  }, []);
+  useEffect(() => { fetchTrips(); }, []);
 
   const fetchTrips = async () => {
     try {
@@ -40,381 +44,228 @@ const DashboardView = () => {
     }
   };
 
-  // Three.js 3D Rotating Radar Grid Background
-  useEffect(() => {
-    if (!threeContainerRef.current) return;
-
-    const container = threeContainerRef.current;
-    const width = container.clientWidth || window.innerWidth;
-    const height = container.clientHeight || window.innerHeight;
-
-    const scene = new THREE.Scene();
-    const camera = new THREE.PerspectiveCamera(60, width / height, 0.1, 1000);
-    camera.position.z = 10;
-
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    container.appendChild(renderer.domElement);
-
-    // Create a group of concentric radar grid rings
-    const group = new THREE.Group();
-
-    const ringCount = 4;
-    const materials = [];
-    const geometries = [];
-
-    for (let i = 1; i <= ringCount; i++) {
-      const radius = i * 2;
-      const ringGeo = new THREE.RingGeometry(radius - 0.05, radius + 0.05, 64);
-      const ringMat = new THREE.MeshBasicMaterial({
-        color: 0x3b82f6,
-        transparent: true,
-        opacity: 0.15 / i,
-        side: THREE.DoubleSide
-      });
-      const ring = new THREE.Mesh(ringGeo, ringMat);
-      
-      // Rotate to lie flat
-      ring.rotation.x = Math.PI / 2.2;
-      
-      group.add(ring);
-      geometries.push(ringGeo);
-      materials.push(ringMat);
-    }
-
-    // Add some cross grid lines
-    const lineMat = new THREE.LineBasicMaterial({
-      color: 0x3b82f6,
-      transparent: true,
-      opacity: 0.05
-    });
-    
-    const points = [];
-    points.push(new THREE.Vector3(-10, 0, 0));
-    points.push(new THREE.Vector3(10, 0, 0));
-    points.push(new THREE.Vector3(0, 0, -10));
-    points.push(new THREE.Vector3(0, 0, 10));
-    
-    const lineGeo = new THREE.BufferGeometry().setFromPoints(points);
-    const gridLines = new THREE.LineSegments(lineGeo, lineMat);
-    gridLines.rotation.x = Math.PI / 2.2;
-    group.add(gridLines);
-    geometries.push(lineGeo);
-    materials.push(lineMat);
-
-    scene.add(group);
-
-    // Add ambient lights
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.3);
-    scene.add(ambientLight);
-
-    let animId;
-    const animate = () => {
-      animId = requestAnimationFrame(animate);
-
-      // Subtle rotation and tilt breathing
-      group.rotation.z += 0.002;
-      group.rotation.y = Math.sin(Date.now() * 0.0005) * 0.15;
-      
-      renderer.render(scene, camera);
-    };
-    animate();
-
-    const handleResize = () => {
-      if (!container) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-    window.addEventListener('resize', handleResize);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      cancelAnimationFrame(animId);
-      geometries.forEach(g => g.dispose());
-      materials.forEach(m => m.dispose());
-      renderer.dispose();
-      if (container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
-      }
-    };
-  }, []);
-
   const handleCreateTrip = async (e) => {
     e.preventDefault();
     setFormError('');
     if (!title || !origin || !destination) {
-      setFormError('Required coordinates not completed.');
+      setFormError('Title, origin and destination are required.');
       return;
     }
-
     setLoadingForm(true);
     try {
       const res = await axios.post('/trips', {
-        title,
-        description,
-        origin,
-        destination,
-        startDate
+        title, description, origin, destination, startDate,
+        distanceKm: distanceKm ? parseFloat(distanceKm) : undefined
       });
       setTrips([res.data, ...trips]);
       setShowCreateModal(false);
-      setTitle('');
-      setOrigin('');
-      setDestination('');
-      setDescription('');
-      setStartDate('');
-      
+      setTitle(''); setOrigin(''); setDestination('');
+      setDescription(''); setStartDate(''); setDistanceKm('');
       navigate(`/trips/${res.data._id}`);
     } catch (err) {
-      setFormError(err.response?.data?.message || 'Error deploying route.');
+      setFormError(err.response?.data?.message || 'Could not create trip.');
     } finally {
       setLoadingForm(false);
     }
   };
 
-  const activeCount = trips.filter(t => t.status === 'active').length;
+  const activeCount    = trips.filter(t => t.status === 'active').length;
+  const planningCount  = trips.filter(t => t.status === 'planning').length;
+  const completedCount = trips.filter(t => t.status === 'completed').length;
+
+  const filteredTrips = filterStatus === 'all'
+    ? trips
+    : trips.filter(t => t.status === filterStatus);
 
   return (
-    <div className="bg-background text-on-background min-h-screen relative font-body-md select-none pb-24">
-      
-      {/* 3D Radar Grid Background */}
-      <div className="absolute inset-0 z-0 pointer-events-none">
-        <div ref={threeContainerRef} className="fixed inset-0 w-full h-full bg-transparent" />
-      </div>
+    <div className="bg-[#0a0b0d] text-white min-h-screen antialiased pb-28">
 
-      <main className="relative z-10 max-w-screen-md mx-auto px-6 pt-8">
-        
-        {/* Header HUD Bar */}
-        <header className="flex justify-between items-center mb-8 bg-surface-container-low/50 border border-outline-variant/30 backdrop-blur-md rounded-2xl p-4 shadow-[0_4px_15px_rgba(0,0,0,0.5)]">
-          <div className="flex items-center gap-3">
-            <div className="h-10 w-10 rounded-full border border-primary/20 bg-primary/10 flex items-center justify-center">
-              <Compass className="w-5 h-5 text-primary animate-spin" style={{ animationDuration: '10s' }} />
+      {/* ── HEADER ── */}
+      <header className="sticky top-0 z-40 bg-[#0a0b0d]/90 backdrop-blur-xl border-b border-white/5 px-5 py-4">
+        <div className="max-w-screen-sm mx-auto flex items-center justify-between">
+          <div>
+            <div className="flex items-center gap-2">
+              <div className="w-7 h-7 rounded-full bg-blue-500/20 border border-blue-500/30 flex items-center justify-center">
+                <Bike size={14} className="text-blue-400" />
+              </div>
+              <span className="text-[11px] font-bold text-blue-400 uppercase tracking-widest">Convoy</span>
             </div>
-            <div>
-              <h1 className="font-headline-lg-mobile text-sm font-bold tracking-widest text-white uppercase">MISSION CONTROL</h1>
-              <p className="font-label-caps text-[9px] text-on-surface-variant opacity-75">
-                AGENT ID: <span className="text-white">{user?.name || 'COORDINATOR'}</span>
-              </p>
-            </div>
+            <p className="text-[10px] text-gray-500 mt-0.5">Welcome back, <span className="text-white font-semibold">{user?.name}</span></p>
           </div>
-          
-          <button 
+          <button
             onClick={logout}
-            className="p-2 rounded-xl bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/20 hover:border-red-400 transition-all cursor-pointer flex items-center justify-center"
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all cursor-pointer active:scale-95"
             title="Log Out"
           >
-            <LogOut className="w-4 h-4" />
+            <LogOut size={15} />
           </button>
-        </header>
+        </div>
+      </header>
 
-        {/* Dashboard Vector HUD stats */}
-        <section className="grid grid-cols-2 gap-4 mb-8">
-          <div className="bg-surface-container/60 border border-outline-variant/30 rounded-xl p-4 flex flex-col justify-between shadow-[0_4px_10px_rgba(0,0,0,0.3)]">
-            <span className="font-label-caps text-[9px] text-on-surface-variant uppercase tracking-wider">ACTIVE CONVOYS</span>
-            <div className="flex items-end gap-1 mt-2">
-              <span className="font-display-lg text-3xl font-extrabold text-primary">{activeCount}</span>
-              <span className="font-label-caps text-[10px] text-primary pb-1">RUNNING</span>
-            </div>
-          </div>
-          <div className="bg-surface-container/60 border border-outline-variant/30 rounded-xl p-4 flex flex-col justify-between shadow-[0_4px_10px_rgba(0,0,0,0.3)]">
-            <span className="font-label-caps text-[9px] text-on-surface-variant uppercase tracking-wider">TOTAL INITIATED</span>
-            <div className="flex items-end gap-1 mt-2">
-              <span className="font-display-lg text-3xl font-extrabold text-on-surface">{trips.length}</span>
-              <span className="font-label-caps text-[10px] text-on-surface-variant pb-1">ROUTES</span>
-            </div>
-          </div>
-        </section>
+      <div className="max-w-screen-sm mx-auto px-4 pt-5 space-y-5">
 
-        {/* Action Button */}
-        <div className="flex justify-between items-center mb-6">
-          <h2 className="font-label-caps text-xs text-on-surface-variant uppercase tracking-widest">Route Directives</h2>
+        {/* ── STATS ROW ── */}
+        <div className="grid grid-cols-3 gap-3">
+          {[
+            { label: 'Active',    count: activeCount,    color: 'text-emerald-400' },
+            { label: 'Planning',  count: planningCount,  color: 'text-yellow-400'  },
+            { label: 'Done',      count: completedCount, color: 'text-blue-400'    },
+          ].map(s => (
+            <div key={s.label} className="bg-[#131416] border border-white/8 rounded-xl p-3 text-center">
+              <p className={`text-2xl font-black ${s.color}`}>{s.count}</p>
+              <p className="text-[9px] uppercase text-gray-500 font-mono mt-0.5">{s.label}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* ── FILTER + NEW ── */}
+        <div className="flex items-center justify-between">
+          <div className="flex gap-1.5">
+            {['all', 'active', 'planning', 'completed'].map(s => (
+              <button
+                key={s}
+                onClick={() => setFilterStatus(s)}
+                className={`px-3 py-1 rounded-lg text-[10px] font-semibold border transition-all cursor-pointer capitalize ${
+                  filterStatus === s
+                    ? 'bg-blue-500/20 border-blue-500/30 text-blue-400'
+                    : 'bg-white/4 border-white/8 text-gray-500 hover:text-white'
+                }`}
+              >
+                {s}
+              </button>
+            ))}
+          </div>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="btn-neon bg-primary/20 hover:bg-primary border border-primary text-primary hover:text-black font-semibold text-xs py-2 px-4 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold cursor-pointer active:scale-95 transition-all"
           >
-            <Plus className="w-4 h-4" />
-            Initialize Route
+            <Plus size={13} /> New Trip
           </button>
         </div>
 
-        {/* Trips List */}
+        {/* ── TRIPS LIST ── */}
         {loading ? (
-          <div className="flex items-center justify-center py-20">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary border-t-transparent"></div>
+          <div className="flex justify-center py-20">
+            <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
           </div>
-        ) : trips.length === 0 ? (
-          <div className="bg-surface-container-low/40 border border-outline-variant/20 rounded-xl p-10 text-center flex flex-col items-center shadow-[0_4px_15px_rgba(0,0,0,0.2)]">
-            <Activity className="w-10 h-10 text-outline-variant/50 mb-3 animate-pulse" />
-            <h3 className="font-title-md text-sm text-on-surface">No active coordinates</h3>
-            <p className="text-xs text-on-surface-variant mt-1 max-w-xs leading-relaxed">
-              Initialize a new convoy run directive to begin coordinating routes, splitting crew expenses, and monitoring live telemetry.
-            </p>
+        ) : filteredTrips.length === 0 ? (
+          <div className="text-center py-16 border border-white/5 rounded-2xl bg-white/2">
+            <Activity className="w-10 h-10 mx-auto mb-3 text-gray-700" />
+            <p className="text-sm text-gray-500">No trips here yet.</p>
+            <p className="text-xs text-gray-700 mt-1">Tap "New Trip" to plan your convoy.</p>
           </div>
         ) : (
-          <div className="space-y-4">
-            {trips.map((trip, idx) => (
+          <div className="space-y-3">
+            {filteredTrips.map((trip, idx) => (
               <motion.div
                 key={trip._id}
-                initial={{ opacity: 0, y: 15 }}
+                initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.05 }}
+                transition={{ delay: idx * 0.04 }}
                 onClick={() => navigate(`/trips/${trip._id}`)}
-                className="bg-surface-container/60 hover:bg-surface-container-high border border-outline-variant/30 hover:border-primary/40 rounded-xl p-5 shadow-[0_4px_15px_rgba(0,0,0,0.3)] hover:shadow-[0_0_15px_rgba(173,198,255,0.15)] relative overflow-hidden group cursor-pointer transition-all duration-300"
+                className="bg-[#131416] border border-white/8 hover:border-white/15 rounded-2xl p-4 cursor-pointer group transition-all relative overflow-hidden"
               >
-                {/* Header status */}
+                <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-blue-500/20 to-transparent" />
+
                 <div className="flex justify-between items-start mb-3">
-                  <div>
-                    <h3 className="font-title-md text-sm text-white group-hover:text-primary transition-colors">
-                      {trip.title}
-                    </h3>
+                  <div className="flex-1 min-w-0">
+                    <h3 className="font-bold text-sm text-white group-hover:text-blue-400 transition-colors truncate">{trip.title}</h3>
                     {trip.description && (
-                      <p className="text-[11px] text-on-surface-variant line-clamp-1 mt-0.5 max-w-[80%]">
-                        {trip.description}
-                      </p>
+                      <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-1">{trip.description}</p>
                     )}
                   </div>
-                  
-                  <span className={`px-2 py-0.5 rounded text-[8px] font-bold uppercase tracking-wider ${
-                    trip.status === 'active' 
-                      ? 'bg-primary/20 text-primary border border-primary/30 shadow-[0_0_8px_rgba(173,198,255,0.3)] animate-pulse' 
-                      : 'bg-surface-container-highest text-on-surface-variant border border-outline-variant/30'
-                  }`}>
+                  <span className={`ml-3 shrink-0 px-2 py-0.5 rounded-full text-[9px] font-bold border capitalize ${STATUS_COLOR[trip.status] || STATUS_COLOR.planning}`}>
+                    {trip.status === 'active' && <span className="inline-block w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 animate-pulse" />}
                     {trip.status}
                   </span>
                 </div>
 
-                {/* Footer specs */}
-                <div className="flex justify-between items-center border-t border-outline-variant/25 pt-4 text-[10px] text-on-surface-variant font-label-caps">
+                <div className="flex items-center justify-between text-[10px] text-gray-500">
                   <div className="flex items-center gap-1">
-                    <MapPin className="w-3.5 h-3.5 text-primary" />
-                    <span className="truncate max-w-[140px]">{trip.origin} → {trip.destination}</span>
+                    <MapPin size={10} className="text-blue-400 shrink-0" />
+                    <span className="truncate max-w-[160px]">{trip.origin} → {trip.destination}</span>
                   </div>
-                  <div className="flex items-center gap-3">
-                    <span className="flex items-center gap-1 text-[9px]">
-                      <Calendar className="w-3.5 h-3.5 text-amber-400" />
-                      {trip.startDate ? new Date(trip.startDate).toLocaleDateString() : 'TBD'}
-                    </span>
+                  <div className="flex items-center gap-3 shrink-0">
+                    {trip.startDate && (
+                      <span className="flex items-center gap-1">
+                        <Calendar size={10} className="text-yellow-400" />
+                        {new Date(trip.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short' })}
+                      </span>
+                    )}
                     <span className="flex items-center gap-1">
-                      <Users className="w-3.5 h-3.5 text-violet-400" />
-                      {trip.members?.length || 1} Crew
+                      <Users size={10} className="text-purple-400" />
+                      {trip.members?.length || 1}
                     </span>
-                    <ArrowRight className="w-3.5 h-3.5 text-primary group-hover:translate-x-1.5 transition-transform" />
+                    <ArrowRight size={12} className="text-gray-600 group-hover:text-white group-hover:translate-x-0.5 transition-all" />
                   </div>
                 </div>
               </motion.div>
             ))}
           </div>
         )}
+      </div>
 
-      </main>
-
-      {/* Create Trip Modal */}
+      {/* ── CREATE TRIP MODAL ── */}
       <AnimatePresence>
         {showCreateModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/60 backdrop-blur-md">
+          <div className="fixed inset-0 z-50 flex items-end justify-center px-4 pb-8 bg-black/60 backdrop-blur-md" onClick={() => setShowCreateModal(false)}>
             <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="glass-panel w-full max-w-md rounded-2xl p-6 border border-white/10 shadow-2xl backdrop-blur-2xl"
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 35 }}
+              className="bg-[#131416] border border-white/10 rounded-3xl p-6 w-full max-w-md"
+              onClick={e => e.stopPropagation()}
             >
-              <h2 className="font-headline-lg-mobile text-sm font-bold text-white mb-2 uppercase tracking-wider">Initialize Convoy Run</h2>
-              <p className="text-[11px] text-on-surface-variant mb-4 font-label-caps">PROMPT VECTOR DIRECTIVES</p>
+              <h2 className="text-base font-bold text-white mb-1">New Trip</h2>
+              <p className="text-[10px] text-gray-500 mb-4">Plan a new convoy run with your crew.</p>
 
               {formError && (
-                <div className="mb-4 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-1.5 text-xs text-red-400">
-                  {formError}
-                </div>
+                <div className="mb-3 text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">{formError}</div>
               )}
 
-              <form onSubmit={handleCreateTrip} className="space-y-4">
-                <div className="space-y-1">
-                  <label htmlFor="trip-title" className="block font-label-caps text-[10px] text-on-surface-variant">RUN LABEL</label>
-                  <input
-                    type="text"
-                    id="trip-title"
-                    name="title"
-                    value={title}
-                    onChange={(e) => setTitle(e.target.value)}
-                    placeholder="e.g. Gokarna Coastal Run"
-                    className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-2 px-3 text-xs text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                  />
+              <form onSubmit={handleCreateTrip} className="space-y-3">
+                <input type="text" value={title} onChange={e => setTitle(e.target.value)}
+                  placeholder="Trip name (e.g. Gokarna Weekend Run)" required
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500/40 transition-all" />
+
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="text" value={origin} onChange={e => setOrigin(e.target.value)}
+                    placeholder="From (e.g. Pune)" required
+                    className="bg-white/5 border border-white/10 rounded-xl py-2.5 px-3 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500/40 transition-all" />
+                  <input type="text" value={destination} onChange={e => setDestination(e.target.value)}
+                    placeholder="To (e.g. Gokarna)" required
+                    className="bg-white/5 border border-white/10 rounded-xl py-2.5 px-3 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500/40 transition-all" />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label htmlFor="trip-origin" className="block font-label-caps text-[10px] text-on-surface-variant">ORIGIN</label>
-                    <input
-                      type="text"
-                      id="trip-origin"
-                      name="origin"
-                      value={origin}
-                      onChange={(e) => setOrigin(e.target.value)}
-                      placeholder="e.g. Bangalore"
-                      className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-2 px-3 text-xs text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                    />
+                <div className="grid grid-cols-2 gap-2">
+                  <div>
+                    <label className="text-[9px] text-gray-600 uppercase font-mono block mb-1 pl-1">Start Date</label>
+                    <input type="date" value={startDate} onChange={e => setStartDate(e.target.value)}
+                      className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 px-3 text-xs text-white outline-none focus:border-blue-500/40 transition-all" />
                   </div>
-                  <div className="space-y-1">
-                    <label htmlFor="trip-destination" className="block font-label-caps text-[10px] text-on-surface-variant">DESTINATION</label>
-                    <input
-                      type="text"
-                      id="trip-destination"
-                      name="destination"
-                      value={destination}
-                      onChange={(e) => setDestination(e.target.value)}
-                      placeholder="e.g. Gokarna"
-                      className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-2 px-3 text-xs text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                    />
+                  <div>
+                    <label className="text-[9px] text-gray-600 uppercase font-mono block mb-1 pl-1">Distance (km)</label>
+                    <input type="number" value={distanceKm} onChange={e => setDistanceKm(e.target.value)}
+                      placeholder="e.g. 520" min="0"
+                      className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 px-3 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500/40 transition-all" />
                   </div>
                 </div>
 
-                <div className="space-y-1">
-                  <label htmlFor="trip-startdate" className="block font-label-caps text-[10px] text-on-surface-variant">DEPLOY DATE</label>
-                  <input
-                    type="date"
-                    id="trip-startdate"
-                    name="startDate"
-                    value={startDate}
-                    onChange={(e) => setStartDate(e.target.value)}
-                    className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-2 px-3 text-xs text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary"
-                  />
-                </div>
+                <textarea value={description} onChange={e => setDescription(e.target.value)}
+                  placeholder="Short description (optional)" rows={2}
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-2.5 px-3 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500/40 resize-none transition-all" />
 
-                <div className="space-y-1">
-                  <label htmlFor="trip-description" className="block font-label-caps text-[10px] text-on-surface-variant">CHECKLIST DIRECTIVES</label>
-                  <textarea
-                    id="trip-description"
-                    name="description"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="Route instructions, radar checkpoints..."
-                    rows="3"
-                    className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-2 px-3 text-xs text-white outline-none focus:border-primary focus:ring-1 focus:ring-primary resize-none"
-                  />
-                </div>
-
-                <div className="flex gap-3 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowCreateModal(false)}
-                    className="flex-1 py-2 rounded-xl text-xs font-bold border border-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
-                  >
-                    ABORT
+                <div className="flex gap-2 pt-1">
+                  <button type="button" onClick={() => setShowCreateModal(false)}
+                    className="flex-1 py-3 rounded-xl border border-white/10 text-xs font-bold text-gray-400 hover:text-white cursor-pointer transition-all">
+                    Cancel
                   </button>
-                  <button
-                    type="submit"
-                    disabled={loadingForm}
-                    className="flex-1 py-2 btn-neon text-black rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    {loadingForm ? (
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-black border-t-transparent"></div>
-                    ) : (
-                      'DEPLOY'
-                    )}
+                  <button type="submit" disabled={loadingForm}
+                    className="flex-1 py-3 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold cursor-pointer transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5">
+                    {loadingForm
+                      ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                      : <><Plus size={13} /> Create Trip</>}
                   </button>
                 </div>
               </form>
@@ -422,7 +273,6 @@ const DashboardView = () => {
           </div>
         )}
       </AnimatePresence>
-
     </div>
   );
 };

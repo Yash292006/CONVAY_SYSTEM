@@ -54,7 +54,7 @@ router.get('/:id', protect, async (req, res) => {
 // @route   POST /api/trips
 // @access  Private
 router.post('/', protect, async (req, res) => {
-  const { title, destination, startDate, origin, description } = req.body;
+  const { title, destination, startDate, origin, description, distanceKm } = req.body;
 
   try {
     const adminId = req.user._id;
@@ -64,6 +64,7 @@ router.post('/', protect, async (req, res) => {
       destination: destination || 'Gokarna',
       origin: origin || 'Start Point',
       description: description || '',
+      distanceKm: distanceKm || null,
       admin: adminId,
       members: [adminId],
       startDate: startDate || Date.now(),

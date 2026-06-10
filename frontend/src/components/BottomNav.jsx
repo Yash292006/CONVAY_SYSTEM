@@ -1,81 +1,78 @@
 import React, { useContext } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { LayoutDashboard, Map, Users, LogOut, Receipt } from 'lucide-react';
+import { LayoutDashboard, Map, Users, Receipt, LogOut } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { AuthContext } from '../App';
 
 const BottomNav = () => {
-  const navigate = useNavigate();
-  const location = useLocation();
+  const navigate  = useNavigate();
+  const location  = useLocation();
   const { logout, user } = useContext(AuthContext);
 
   const navItems = [
-    { path: '/', icon: LayoutDashboard, label: 'Dashboard' },
-    { path: '/map/live', icon: Map, label: 'Live Map' },
-    { path: '/friends', icon: Users, label: 'Friends' },
-    { path: '/ledger', icon: Receipt, label: 'Ledger' },
+    { path: '/',        icon: LayoutDashboard, label: 'Home'    },
+    { path: '/friends', icon: Users,           label: 'Crew'    },
+    { path: '/ledger',  icon: Receipt,         label: 'Ledger'  },
   ];
 
-  const handleNav = (path) => {
-    navigate(path);
+  const isActive = (item) => {
+    if (item.path === '/') {
+      return location.pathname === '/' || location.pathname.startsWith('/trips/');
+    }
+    return location.pathname.startsWith(item.path);
   };
 
-  return (
-    <div className="fixed bottom-6 left-0 right-0 z-50 flex justify-center px-4">
-      <div className="glass-panel flex items-center justify-between w-full max-w-md px-6 py-3 rounded-2xl shadow-lg border border-white/10 backdrop-blur-xl">
-        {navItems.map((item) => {
-          const isActive = 
-            item.path === '/' 
-              ? location.pathname === '/' || location.pathname.startsWith('/trips/')
-              : location.pathname.startsWith(item.path.split('/')[1]);
+  // Don't show nav on map pages or trip pages with /map
+  const hideNav = location.pathname.startsWith('/map/');
+  if (hideNav) return null;
 
+  return (
+    <div className="fixed bottom-6 left-0 right-0 z-50 flex justify-center px-5">
+      <div className="flex items-center gap-1 bg-[#131416]/95 backdrop-blur-xl border border-white/10 rounded-2xl px-3 py-2 shadow-[0_8px_32px_rgba(0,0,0,0.5)]">
+
+        {navItems.map((item) => {
+          const active = isActive(item);
           return (
             <button
               key={item.label}
-              onClick={() => handleNav(item.path)}
-              className="relative flex flex-col items-center gap-1 group cursor-pointer"
+              onClick={() => navigate(item.path)}
+              className="relative flex flex-col items-center gap-1 px-4 py-1.5 rounded-xl group cursor-pointer transition-all"
             >
-              <div className="relative p-2 rounded-xl transition-all duration-300">
-                {isActive && (
-                  <motion.div
-                    layoutId="activeNavIndicator"
-                    className="absolute inset-0 bg-emerald-500/10 border border-emerald-500/25 rounded-xl -z-10"
-                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
-                  />
-                )}
-                <item.icon 
-                  className={`w-6 h-6 transition-colors duration-300 ${
-                    isActive 
-                      ? 'text-emerald-400 filter drop-shadow-[0_0_8px_rgba(16,185,129,0.5)]' 
-                      : 'text-gray-400 group-hover:text-white'
-                  }`} 
+              {active && (
+                <motion.div
+                  layoutId="navIndicator"
+                  className="absolute inset-0 bg-blue-500/15 border border-blue-500/25 rounded-xl"
+                  transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                 />
-              </div>
-              <span className={`text-[10px] font-medium transition-all duration-300 ${
-                isActive ? 'text-emerald-400' : 'text-gray-400 group-hover:text-white'
+              )}
+              <item.icon
+                size={20}
+                className={`transition-colors duration-200 relative z-10 ${
+                  active ? 'text-blue-400' : 'text-gray-500 group-hover:text-gray-300'
+                }`}
+              />
+              <span className={`text-[9px] font-semibold transition-colors duration-200 relative z-10 ${
+                active ? 'text-blue-400' : 'text-gray-600 group-hover:text-gray-400'
               }`}>
                 {item.label}
               </span>
-              {isActive && (
-                <span className="absolute -top-1 w-1.5 h-1.5 bg-emerald-400 rounded-full shadow-[0_0_8px_#10b981]" />
-              )}
             </button>
           );
         })}
 
-        {/* Logout Button */}
+        {/* Divider */}
+        <div className="w-px h-8 bg-white/8 mx-1" />
+
+        {/* Logout */}
         <button
           onClick={logout}
-          className="flex flex-col items-center gap-1 group cursor-pointer"
+          className="flex flex-col items-center gap-1 px-3 py-1.5 rounded-xl group cursor-pointer"
           title={`Logged in as ${user?.name || ''}`}
         >
-          <div className="p-2 rounded-xl transition-all duration-300">
-            <LogOut className="w-6 h-6 text-gray-400 group-hover:text-red-400 transition-colors" />
-          </div>
-          <span className="text-[10px] font-medium text-gray-400 group-hover:text-red-400 transition-colors">
-            Exit
-          </span>
+          <LogOut size={18} className="text-gray-600 group-hover:text-red-400 transition-colors" />
+          <span className="text-[9px] font-semibold text-gray-600 group-hover:text-red-400 transition-colors">Exit</span>
         </button>
+
       </div>
     </div>
   );

@@ -296,7 +296,7 @@ const LoginView = () => {
     setError('');
 
     if (!email || !password || (activeTab === 'join' && !name)) {
-      setError('Required parameters not completed.');
+      setError('Please fill in all required fields.');
       return;
     }
 
@@ -305,33 +305,26 @@ const LoginView = () => {
     try {
       let res;
       if (activeTab === 'join') {
-        console.log("Attempting Registration for:", email);
         res = await register(name, email, password, moto);
       } else {
-        console.log("1. Attempting Login with:", email);
         res = await login(email, password);
       }
 
       setLoadingForm(false);
 
       if (res.success) {
-        if (activeTab === 'signin') {
-          console.log("2. Backend Response: Success!");
-          console.log("3. Saved to Storage! Token is:", localStorage.getItem('convoyToken'));
-          navigate('/');
-        } else {
-          console.log("Registration Successful!");
-          alert('Crew member registered! Please sign in.');
+        if (activeTab === 'join') {
+          alert('Account created! Please sign in.');
           setActiveTab('signin');
+        } else {
+          navigate('/');
         }
       } else {
-        console.warn("LOGIN/REGISTER FAILED:", res.message);
         setError(res.message);
       }
     } catch (err) {
-      console.error("LOGIN/REGISTER ERROR:", err.message);
       setLoadingForm(false);
-      setError('Connection failed');
+      setError('Connection failed. Is the server running?');
     }
   };
 
@@ -506,11 +499,6 @@ const LoginView = () => {
             </button>
           </form>
         </div>
-      </div>
-
-      {/* Demo Credentials alert */}
-      <div className="mt-4 p-3 rounded-xl bg-white/5 border border-white/5 text-center text-xs text-gray-500 max-w-md z-20">
-        <span className="text-primary font-medium">Simulation node:</span> You can sign up with any email, or use <span className="text-white">user1@test.com / 123456</span>
       </div>
 
     </div>
