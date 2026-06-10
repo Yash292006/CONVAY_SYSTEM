@@ -1,50 +1,99 @@
 import React, { useState, useEffect, useRef, useContext } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import axios from 'axios';
-import * as THREE from 'three';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthContext } from '../App';
-import { 
-  ArrowLeft, Plus, MapPin, Calendar, CreditCard, Trash2, 
-  Users, UserPlus, DollarSign, Compass, Activity, ShieldAlert, CheckSquare 
+import {
+  ArrowLeft, MapPin, Calendar, CreditCard, Trash2,
+  Users, UserPlus, DollarSign, Compass, Activity,
+  ShieldAlert, Plus, Fuel, Coffee, Bed, Flag, MoreHorizontal,
+  CheckCircle2, Circle, ChevronDown, ChevronUp, Edit3,
+  Navigation, AlertTriangle, X, Send
 } from 'lucide-react';
 
+// ─── Waypoint type config ────────────────────────────────────────────────────
+const WP_TYPES = {
+  fuel:       { label: 'Fuel Stop',   icon: '⛽', color: 'text-yellow-400',  border: 'border-yellow-500/30', bg: 'bg-yellow-500/10' },
+  food:       { label: 'Food Stop',   icon: '🍽️', color: 'text-orange-400', border: 'border-orange-500/30', bg: 'bg-orange-500/10' },
+  rest:       { label: 'Rest Stop',   icon: '🛏️', color: 'text-purple-400', border: 'border-purple-500/30', bg: 'bg-purple-500/10' },
+  checkpoint: { label: 'Checkpoint',  icon: '🚩', color: 'text-blue-400',   border: 'border-blue-500/30',   bg: 'bg-blue-500/10'  },
+  custom:     { label: 'Custom Stop', icon: '📍', color: 'text-gray-400',   border: 'border-gray-500/30',   bg: 'bg-gray-500/10'  },
+};
+
+// ─── Status config ────────────────────────────────────────────────────────────
+const STATUS_CONFIG = {
+  planning:  { label: 'Planning',  color: 'text-yellow-400', dot: 'bg-yellow-400', badge: 'bg-yellow-400/10 border-yellow-400/30' },
+  active:    { label: 'Active',    color: 'text-emerald-400', dot: 'bg-emerald-400', badge: 'bg-emerald-400/10 border-emerald-400/30' },
+  completed: { label: 'Completed', color: 'text-blue-400',   dot: 'bg-blue-400',   badge: 'bg-blue-400/10   border-blue-400/30'   },
+};
+
+// ─── Fuel estimator ───────────────────────────────────────────────────────────
+const estimateFuel = (distKm, mileageKmpl = 35, pricePerL = 105) => {
+  if (!distKm) return null;
+  const litres = distKm / mileageKmpl;
+  const cost   = litres * pricePerL;
+  return { litres: litres.toFixed(1), cost: Math.round(cost) };
+};
+
+// ─── Pre-trip checklist items ─────────────────────────────────────────────────
+const CHECKLIST = [
+  { id: 'license',   label: 'Driving License & RC' },
+  { id: 'insurance', label: 'Vehicle Insurance' },
+  { id: 'helmet',    label: 'Helmet & Gear' },
+  { id: 'toolkit',   label: 'Toolkit & Puncture Kit' },
+  { id: 'firstaid',  label: 'First-Aid Kit' },
+  { id: 'fuel',      label: 'Full Tank' },
+  { id: 'water',     label: 'Water & Snacks' },
+  { id: 'maps',      label: 'Offline Maps Downloaded' },
+];
+
+// ─────────────────────────────────────────────────────────────────────────────
 const TripDetailView = () => {
-  const { id } = useParams();
-  const navigate = useNavigate();
-  const { user } = useContext(AuthContext);
+  const { id }     = useParams();
+  const navigate   = useNavigate();
+  const { user }   = useContext(AuthContext);
 
-  const [trip, setTrip] = useState(null);
-  const [expenses, setExpenses] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const [activeTab, setActiveTab] = useState('waypoints'); // 'waypoints' | 'ledger' | 'crew'
+  const [trip,         setTrip]         = useState(null);
+  const [expenses,     setExpenses]     = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState('');
+  const [activeTab,    setActiveTab]    = useState('overview');
+  const [checklist,    setChecklist]    = useState(() => {
+    try { return JSON.parse(localStorage.getItem(`checklist_${id}`)) || {}; } catch { return {}; }
+  });
 
-  // Modals
+  // Waypoints
+  const [showWpModal,  setShowWpModal]  = useState(false);
+  const [wpName,       setWpName]       = useState('');
+  const [wpType,       setWpType]       = useState('checkpoint');
+  const [wpNote,       setWpNote]       = useState('');
+  const [wpTime,       setWpTime]       = useState('');
+  const [wpLoading,    setWpLoading]    = useState(false);
+
+  // Members
   const [showMemberModal, setShowMemberModal] = useState(false);
-  const [memberEmail, setMemberEmail] = useState('');
-  const [memberError, setMemberError] = useState('');
-  const [loadingMember, setLoadingMember] = useState(false);
+  const [memberEmail,     setMemberEmail]     = useState('');
+  const [memberError,     setMemberError]     = useState('');
+  const [loadingMember,   setLoadingMember]   = useState(false);
 
+  // Expenses
   const [showExpenseModal, setShowExpenseModal] = useState(false);
-  const [expenseDesc, setExpenseDesc] = useState('');
-  const [expenseAmount, setExpenseAmount] = useState('');
-  const [expensePayer, setExpensePayer] = useState('');
-  const [expenseSplit, setExpenseSplit] = useState([]);
-  const [expenseError, setExpenseError] = useState('');
-  const [loadingExpense, setLoadingExpense] = useState(false);
+  const [expenseDesc,      setExpenseDesc]      = useState('');
+  const [expenseAmount,    setExpenseAmount]    = useState('');
+  const [expensePayer,     setExpensePayer]     = useState('');
+  const [expenseSplit,     setExpenseSplit]     = useState([]);
+  const [expenseError,     setExpenseError]     = useState('');
+  const [loadingExpense,   setLoadingExpense]   = useState(false);
 
-  // Simulated Waypoints state
-  const [waypoints, setWaypoints] = useState([
-    { id: 1, name: 'Origin Checkout', time: '08:00 AM', distance: '0 mi', done: true },
-    { id: 2, name: 'Golden Gate Viewpoint', time: '10:15 AM', distance: '45 mi', done: true, fuel: true, food: true },
-    { id: 3, name: 'Highway 1 Diner', time: '01:00 PM', distance: '120 mi', done: false, food: true },
-    { id: 4, name: 'Coastal Ghat Entry', time: '03:45 PM', distance: '210 mi', done: false },
-    { id: 5, name: 'Beach Stay Terminal', time: '05:30 PM', distance: '280 mi', done: false }
-  ]);
+  // Notes
+  const [notes,       setNotes]       = useState('');
+  const [notesSaving, setNotesSaving] = useState(false);
+  const notesTimer = useRef(null);
 
-  const threeContainerRef = useRef(null);
+  // SOS
+  const [sosActive, setSosActive] = useState(false);
 
+  // ─── Load trip ──────────────────────────────────────────────────────────────
   useEffect(() => {
     fetchTripDetails();
   }, [id]);
@@ -55,121 +104,82 @@ const TripDetailView = () => {
       const res = await axios.get(`/trips/${id}`);
       setTrip(res.data.trip);
       setExpenses(res.data.expenses);
-      
+      setNotes(res.data.trip.notes || '');
       if (res.data.trip) {
         setExpensePayer(user._id);
         setExpenseSplit(res.data.trip.members.map(m => m._id));
       }
     } catch (err) {
-      console.error(err);
       setError('Failed to fetch convoy details.');
     } finally {
       setLoading(false);
     }
   };
 
-  // 1. Three.js Topographical Grid Background
-  useEffect(() => {
-    if (!threeContainerRef.current) return;
+  // ─── Checklist persist ──────────────────────────────────────────────────────
+  const toggleCheck = (itemId) => {
+    const next = { ...checklist, [itemId]: !checklist[itemId] };
+    setChecklist(next);
+    localStorage.setItem(`checklist_${id}`, JSON.stringify(next));
+  };
 
-    const container = threeContainerRef.current;
-    const width = container.clientWidth || window.innerWidth;
-    const height = container.clientHeight || window.innerHeight;
-
-    // Scene setup
-    const scene = new THREE.Scene();
-    
-    // Camera
-    const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
-    camera.position.z = 15;
-    camera.position.y = 5;
-
-    // Renderer
-    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
-    renderer.setSize(width, height);
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    container.appendChild(renderer.domElement);
-
-    // Topographical Grid Geometry
-    const geometry = new THREE.PlaneGeometry(100, 100, 50, 50);
-    const material = new THREE.MeshPhongMaterial({
-      color: 0x3b82f6,
-      wireframe: true,
-      transparent: true,
-      opacity: 0.2,
-      emissive: 0x3b82f6,
-      emissiveIntensity: 0.5
-    });
-
-    const plane = new THREE.Mesh(geometry, material);
-    plane.rotation.x = -Math.PI / 2.5;
-    scene.add(plane);
-
-    // Deform plane to create topography wave
-    const pos = geometry.attributes.position;
-    for (let i = 0; i < pos.count; i++) {
-      const x = pos.getX(i);
-      const y = pos.getY(i);
-      const z = Math.sin(x * 0.2) * Math.cos(y * 0.2) * 2 + Math.random() * 0.5;
-      pos.setZ(i, z);
+  // ─── Status change ──────────────────────────────────────────────────────────
+  const handleStatusChange = async (newStatus) => {
+    try {
+      await axios.patch(`/trips/${id}/status`, { status: newStatus });
+      setTrip(prev => ({ ...prev, status: newStatus }));
+    } catch (e) {
+      alert(e.response?.data?.message || 'Could not update status.');
     }
-    pos.needsUpdate = true;
+  };
 
-    // Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.2);
-    scene.add(ambientLight);
+  // ─── Notes auto-save ────────────────────────────────────────────────────────
+  const handleNotesChange = (val) => {
+    setNotes(val);
+    clearTimeout(notesTimer.current);
+    notesTimer.current = setTimeout(async () => {
+      setNotesSaving(true);
+      try { await axios.patch(`/trips/${id}/notes`, { notes: val }); } catch {}
+      setNotesSaving(false);
+    }, 1200);
+  };
 
-    const pointLight = new THREE.PointLight(0x3b82f6, 1);
-    pointLight.position.set(0, 10, 10);
-    scene.add(pointLight);
+  // ─── Waypoints ──────────────────────────────────────────────────────────────
+  const handleAddWaypoint = async (e) => {
+    e.preventDefault();
+    if (!wpName.trim()) return;
+    setWpLoading(true);
+    try {
+      const res = await axios.post(`/trips/${id}/waypoints`, {
+        name: wpName, type: wpType, note: wpNote, estimatedTime: wpTime
+      });
+      setTrip(prev => ({ ...prev, waypoints: res.data }));
+      setShowWpModal(false);
+      setWpName(''); setWpType('checkpoint'); setWpNote(''); setWpTime('');
+    } catch { alert('Could not add waypoint.'); }
+    setWpLoading(false);
+  };
 
-    let animId;
-    const animate = () => {
-      animId = requestAnimationFrame(animate);
-      
-      plane.position.z += 0.05;
-      if (plane.position.z > 5) {
-        plane.position.z = 0;
-      }
-      
-      plane.rotation.z += 0.001;
-      
-      renderer.render(scene, camera);
-    };
-    animate();
+  const toggleWpReached = async (wpId) => {
+    try {
+      const res = await axios.patch(`/trips/${id}/waypoints/${wpId}/reached`);
+      setTrip(prev => ({ ...prev, waypoints: res.data }));
+    } catch { alert('Could not update waypoint.'); }
+  };
 
-    const handleResize = () => {
-      if (!container) return;
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-    };
-    window.addEventListener('resize', handleResize);
+  const deleteWaypoint = async (wpId) => {
+    if (!window.confirm('Remove this stop?')) return;
+    try {
+      const res = await axios.delete(`/trips/${id}/waypoints/${wpId}`);
+      setTrip(prev => ({ ...prev, waypoints: res.data }));
+    } catch { alert('Could not delete waypoint.'); }
+  };
 
-    // Cleanup
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      cancelAnimationFrame(animId);
-      geometry.dispose();
-      material.dispose();
-      renderer.dispose();
-      if (container.contains(renderer.domElement)) {
-        container.removeChild(renderer.domElement);
-      }
-    };
-  }, []);
-
-  // Members invite submit handler
+  // ─── Members ────────────────────────────────────────────────────────────────
   const handleAddMember = async (e) => {
     e.preventDefault();
     setMemberError('');
-    if (!memberEmail) {
-      setMemberError('Email is required.');
-      return;
-    }
-
+    if (!memberEmail) { setMemberError('Email is required.'); return; }
     setLoadingMember(true);
     try {
       const res = await axios.post(`/trips/${id}/members`, { email: memberEmail });
@@ -179,137 +189,95 @@ const TripDetailView = () => {
       setExpenseSplit(res.data.members.map(m => m._id));
     } catch (err) {
       setMemberError(err.response?.data?.message || 'Error adding member.');
-    } finally {
-      setLoadingMember(false);
     }
+    setLoadingMember(false);
   };
 
-  // Expense logging handler
+  // ─── Expenses ───────────────────────────────────────────────────────────────
   const handleAddExpense = async (e) => {
     e.preventDefault();
     setExpenseError('');
     if (!expenseDesc || !expenseAmount || !expensePayer || expenseSplit.length === 0) {
-      setExpenseError('Please enter description, amount, payer, and select splits.');
+      setExpenseError('Please fill all fields.');
       return;
     }
-
     setLoadingExpense(true);
     try {
       const res = await axios.post(`/trips/${id}/expenses`, {
-        description: expenseDesc,
-        amount: expenseAmount,
-        paidById: expensePayer,
-        splitAmongIds: expenseSplit
+        description: expenseDesc, amount: expenseAmount,
+        paidById: expensePayer, splitAmongIds: expenseSplit
       });
-      setExpenses([...expenses, res.data]);
-      setExpenseDesc('');
-      setExpenseAmount('');
+      setExpenses(prev => [...prev, res.data]);
+      setExpenseDesc(''); setExpenseAmount('');
       setShowExpenseModal(false);
     } catch (err) {
       setExpenseError(err.response?.data?.message || 'Error adding expense.');
-    } finally {
-      setLoadingExpense(false);
     }
+    setLoadingExpense(false);
   };
 
   const handleDeleteExpense = async (expenseId) => {
-    if (!window.confirm('Delete this expense log?')) return;
-
+    if (!window.confirm('Delete this expense?')) return;
     try {
       await axios.delete(`/trips/${id}/expenses/${expenseId}`);
       setExpenses(expenses.filter(e => e._id !== expenseId));
-    } catch (err) {
-      alert('Error deleting expense.');
-    }
+    } catch { alert('Error deleting expense.'); }
   };
 
-  // ── Splitting math calculator ─────────────────────────────────────────────
+  // ─── Balance calc ────────────────────────────────────────────────────────────
   const calculateBalances = () => {
-    if (!trip) return { balances: {}, totalCost: 0, settlements: [] };
-
+    if (!trip) return { totalCost: 0, settlements: [] };
     const balances = {};
     let totalCost = 0;
-
-    trip.members.forEach(m => {
-      balances[m._id] = { name: m.name, email: m.email, amount: 0 };
-    });
-
+    trip.members.forEach(m => { balances[m._id] = { name: m.name, amount: 0 }; });
     if (trip.admin && !balances[trip.admin._id]) {
-      balances[trip.admin._id] = { name: trip.admin.name, email: trip.admin.email, amount: 0 };
+      balances[trip.admin._id] = { name: trip.admin.name, amount: 0 };
     }
-
     expenses.forEach(exp => {
-      const amount = exp.amount;
-      const payerId = exp.paidBy._id;
+      totalCost += exp.amount;
+      if (balances[exp.paidBy._id]) balances[exp.paidBy._id].amount += exp.amount;
       const splits = exp.splitAmong || [];
-
-      totalCost += amount;
-
-      if (balances[payerId]) {
-        balances[payerId].amount += amount;
-      }
-
       if (splits.length > 0) {
-        const share = amount / splits.length;
-        splits.forEach(s => {
-          if (balances[s._id]) {
-            balances[s._id].amount -= share;
-          }
-        });
+        const share = exp.amount / splits.length;
+        splits.forEach(s => { if (balances[s._id]) balances[s._id].amount -= share; });
       }
     });
-
-    const debtors = [];
-    const creditors = [];
-
-    Object.keys(balances).forEach(id => {
-      const amt = balances[id].amount;
-      if (amt < -0.01) {
-        debtors.push({ id, name: balances[id].name, amount: Math.abs(amt) });
-      } else if (amt > 0.01) {
-        creditors.push({ id, name: balances[id].name, amount: amt });
-      }
-    });
-
-    debtors.sort((a, b) => b.amount - a.amount);
-    creditors.sort((a, b) => b.amount - a.amount);
-
+    const debtors   = Object.keys(balances).filter(id => balances[id].amount < -0.01)
+                        .map(id => ({ id, name: balances[id].name, amount: Math.abs(balances[id].amount) }))
+                        .sort((a, b) => b.amount - a.amount);
+    const creditors = Object.keys(balances).filter(id => balances[id].amount > 0.01)
+                        .map(id => ({ id, name: balances[id].name, amount: balances[id].amount }))
+                        .sort((a, b) => b.amount - a.amount);
     const settlements = [];
-    let dIdx = 0;
-    let cIdx = 0;
-
+    let dIdx = 0, cIdx = 0;
     while (dIdx < debtors.length && cIdx < creditors.length) {
-      const debtor = debtors[dIdx];
-      const creditor = creditors[cIdx];
-
-      const transferAmount = Math.min(debtor.amount, creditor.amount);
-
-      settlements.push({
-        from: debtor.name,
-        to: creditor.name,
-        amount: parseFloat(transferAmount.toFixed(2))
-      });
-
-      debtor.amount -= transferAmount;
-      creditor.amount -= transferAmount;
-
-      if (debtor.amount < 0.01) dIdx++;
-      if (creditor.amount < 0.01) cIdx++;
+      const t = Math.min(debtors[dIdx].amount, creditors[cIdx].amount);
+      settlements.push({ from: debtors[dIdx].name, to: creditors[cIdx].name, amount: +t.toFixed(2) });
+      debtors[dIdx].amount -= t;
+      creditors[cIdx].amount -= t;
+      if (debtors[dIdx].amount < 0.01) dIdx++;
+      if (creditors[cIdx].amount < 0.01) cIdx++;
     }
-
-    return { balances, totalCost, settlements };
+    return { totalCost, settlements };
   };
 
-  const toggleWaypoint = (id) => {
-    setWaypoints(prev =>
-      prev.map(wp => wp.id === id ? { ...wp, done: !wp.done } : wp)
-    );
-  };
+  // ─── Derived ─────────────────────────────────────────────────────────────────
+  const isAdmin        = trip?.admin?._id === user?._id;
+  const statusCfg      = STATUS_CONFIG[trip?.status] || STATUS_CONFIG.planning;
+  const { totalCost, settlements } = calculateBalances();
+  const reached        = trip?.waypoints?.filter(w => w.reached).length || 0;
+  const totalWp        = trip?.waypoints?.length || 0;
+  const fuelEst        = estimateFuel(trip?.distanceKm);
+  const checkDone      = CHECKLIST.filter(c => checklist[c.id]).length;
 
+  // ─── Loading / Error states ──────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-[#0a0b0d]">
-        <div className="h-10 w-10 animate-spin rounded-full border-4 border-emerald-500 border-t-transparent"></div>
+        <div className="flex flex-col items-center gap-4">
+          <div className="h-10 w-10 animate-spin rounded-full border-4 border-blue-500 border-t-transparent" />
+          <p className="text-gray-400 text-sm animate-pulse">Loading convoy data...</p>
+        </div>
       </div>
     );
   }
@@ -318,454 +286,596 @@ const TripDetailView = () => {
     return (
       <div className="max-w-md mx-auto px-4 pt-20 text-center">
         <ShieldAlert className="w-12 h-12 text-red-500 mx-auto mb-4" />
-        <h2 className="text-xl font-bold text-white">Access Violation</h2>
+        <h2 className="text-xl font-bold text-white">Access Denied</h2>
         <p className="text-gray-400 text-sm mt-2">{error || 'Convoy not found.'}</p>
-        <Link to="/" className="inline-block mt-6 px-5 py-2.5 btn-neon text-black rounded-xl text-sm font-semibold">
-          Return to Hub
+        <Link to="/" className="inline-block mt-6 px-5 py-2.5 bg-blue-500 text-black rounded-xl text-sm font-semibold">
+          Back to Hub
         </Link>
       </div>
     );
   }
 
-  const { balances, totalCost, settlements } = calculateBalances();
-
-  // Compute overall run progress
-  const doneCount = waypoints.filter(wp => wp.done).length;
-  const progressPct = Math.round((doneCount / waypoints.length) * 100);
+  // ─── RENDER ───────────────────────────────────────────────────────────────────
+  const TABS = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'stops',    label: `Stops${totalWp ? ` (${reached}/${totalWp})` : ''}` },
+    { key: 'ledger',   label: 'Ledger'   },
+    { key: 'crew',     label: 'Crew'     },
+  ];
 
   return (
-    <div className="bg-background text-on-background overflow-x-hidden font-body-md antialiased selection:bg-primary/30 relative min-h-screen">
-      
-      {/* 3D Topography Engine Background */}
-      <div className="absolute inset-0 z-0 pointer-events-none">
-        <div ref={threeContainerRef} className="fixed inset-0 w-full h-full bg-transparent" />
-      </div>
+    <div className="bg-[#0a0b0d] text-white min-h-screen overflow-x-hidden antialiased pb-28">
 
-      {/* Main Content Canvas */}
-      <main className="relative z-10 flex flex-col min-h-screen pb-24">
-        
-        {/* Glassmorphic Header */}
-        <header className="fixed top-0 w-full z-50 bg-surface/80 backdrop-blur-xl border-b border-outline-variant/30 shadow-[0_4px_20px_rgba(59,130,246,0.15)] pointer-events-auto">
-          <div className="flex items-center justify-between px-6 h-16 w-full max-w-screen-md mx-auto">
-            <button 
-              onClick={() => navigate('/')}
-              aria-label="Back" 
-              className="text-primary hover:text-primary-fixed-dim active:scale-95 transition-transform flex items-center justify-center w-10 h-10 rounded-full bg-primary/10 border border-primary/20 cursor-pointer"
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </button>
+      {/* ── STICKY HEADER ── */}
+      <header className="sticky top-0 z-50 bg-[#0a0b0d]/90 backdrop-blur-xl border-b border-white/5">
+        <div className="flex items-center justify-between px-5 h-14 max-w-screen-sm mx-auto">
+          <button
+            onClick={() => navigate('/')}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-white/5 hover:bg-white/10 border border-white/10 active:scale-95 transition-all cursor-pointer"
+          >
+            <ArrowLeft size={17} />
+          </button>
 
-            <div className="flex flex-col items-center">
-              <h1 className="font-headline-lg-mobile text-[18px] font-bold tracking-tighter uppercase text-on-surface">
-                {trip.title}
-              </h1>
-              <div className="flex items-center gap-2 mt-0.5">
-                <span className="w-2 h-2 rounded-full bg-primary animate-pulse shadow-[0_0_8px_#adc6ff]"></span>
-                <span className="font-label-caps text-[10px] text-primary uppercase">{trip.status}</span>
+          <div className="text-center">
+            <h1 className="text-[15px] font-bold truncate max-w-[180px]">{trip.title}</h1>
+            <div className={`inline-flex items-center gap-1.5 mt-0.5 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${statusCfg.badge}`}>
+              <span className={`w-1.5 h-1.5 rounded-full ${statusCfg.dot} ${trip.status === 'active' ? 'animate-pulse' : ''}`} />
+              <span className={statusCfg.color}>{statusCfg.label}</span>
+            </div>
+          </div>
+
+          <button
+            onClick={() => navigate(`/map/${trip._id}`)}
+            className="w-9 h-9 rounded-full flex items-center justify-center bg-blue-500/20 hover:bg-blue-500/30 border border-blue-500/30 active:scale-95 transition-all cursor-pointer text-blue-400"
+            title="Open Live Map"
+          >
+            <Navigation size={16} />
+          </button>
+        </div>
+      </header>
+
+      <div className="max-w-screen-sm mx-auto px-4 pt-4 space-y-4">
+
+        {/* ── HERO CARD ── */}
+        <div className="bg-[#131416] border border-white/8 rounded-2xl p-5 relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-blue-500/40 to-transparent" />
+
+          <div className="flex justify-between items-start mb-4">
+            <div>
+              <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1 font-mono">Route</p>
+              <div className="flex items-center gap-2 text-sm font-semibold text-white">
+                <span className="text-emerald-400 truncate max-w-[90px]">{trip.origin}</span>
+                <span className="text-gray-600">→</span>
+                <span className="text-red-400 truncate max-w-[90px]">{trip.destination}</span>
               </div>
             </div>
+            <div className="text-right">
+              <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-1 font-mono">Start Date</p>
+              <p className="text-sm font-semibold text-white">
+                {trip.startDate ? new Date(trip.startDate).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+              </p>
+            </div>
+          </div>
 
+          {/* Quick stats row */}
+          <div className="grid grid-cols-3 gap-3">
+            <div className="bg-white/4 rounded-xl p-3 text-center">
+              <p className="text-[9px] uppercase text-gray-500 font-mono mb-1">Members</p>
+              <p className="text-lg font-black text-white">{trip.members?.length || 0}</p>
+            </div>
+            <div className="bg-white/4 rounded-xl p-3 text-center">
+              <p className="text-[9px] uppercase text-gray-500 font-mono mb-1">Stops</p>
+              <p className="text-lg font-black text-white">{totalWp || '—'}</p>
+            </div>
+            <div className="bg-white/4 rounded-xl p-3 text-center">
+              <p className="text-[9px] uppercase text-gray-500 font-mono mb-1">Spend</p>
+              <p className="text-lg font-black text-white">₹{Math.round(totalCost)}</p>
+            </div>
+          </div>
+
+          {/* Status control — admin only */}
+          {isAdmin && (
+            <div className="mt-4 flex gap-2">
+              {['planning', 'active', 'completed'].map(s => (
+                <button
+                  key={s}
+                  onClick={() => handleStatusChange(s)}
+                  className={`flex-1 py-2 rounded-xl text-[10px] font-bold uppercase tracking-wider border transition-all cursor-pointer active:scale-95 ${
+                    trip.status === s
+                      ? `${STATUS_CONFIG[s].badge} ${STATUS_CONFIG[s].color}`
+                      : 'bg-white/4 border-white/8 text-gray-500 hover:text-white hover:border-white/15'
+                  }`}
+                >
+                  {STATUS_CONFIG[s].label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* ── TAB NAV ── */}
+        <div className="flex gap-1 p-1 bg-white/4 rounded-xl border border-white/8">
+          {TABS.map(t => (
             <button
-              onClick={() => navigate(`/map/${trip._id}`)}
-              className="p-1 rounded-lg border border-outline-variant/50 overflow-hidden cursor-pointer"
-              title="Telemetry Map"
+              key={t.key}
+              onClick={() => setActiveTab(t.key)}
+              className={`flex-1 py-2 text-[11px] font-semibold rounded-lg transition-all cursor-pointer ${
+                activeTab === t.key
+                  ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                  : 'text-gray-500 hover:text-white'
+              }`}
             >
-              🧭
+              {t.label}
             </button>
-          </div>
+          ))}
+        </div>
 
-          {/* Quick Stats Bar */}
-          <div className="flex justify-between px-6 py-2 bg-surface-container/50 border-t border-outline-variant/20 max-w-screen-md mx-auto w-full">
-            <div className="flex flex-col">
-              <span className="font-label-caps text-[10px] text-on-surface-variant uppercase">Destination</span>
-              <span className="font-title-md text-sm text-primary truncate max-w-[150px]">{trip.destination}</span>
-            </div>
-            <div className="flex flex-col text-right">
-              <span className="font-label-caps text-[10px] text-on-surface-variant uppercase">Start Date</span>
-              <span className="font-title-md text-sm text-on-surface">
-                {trip.startDate ? new Date(trip.startDate).toLocaleDateString() : 'N/A'}
-              </span>
-            </div>
-          </div>
-        </header>
+        {/* ══════════════════ OVERVIEW TAB ══════════════════ */}
+        {activeTab === 'overview' && (
+          <div className="space-y-4">
 
-        {/* Content Area Wrapper */}
-        <div className="w-full max-w-screen-md mx-auto px-6 mt-32 flex-grow flex flex-col gap-6">
-          
-          {/* Floating Hero Card */}
-          <section className="bg-surface-container/60 backdrop-blur-2xl border border-outline-variant/40 rounded-xl p-5 relative overflow-hidden animate-float shadow-[0_0_15px_rgba(173,198,255,0.2)]">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-primary/50 to-transparent"></div>
-            <div className="absolute bottom-0 right-0 w-16 h-1 bg-primary"></div>
-            
-            <div className="absolute top-4 right-4 text-outline-variant/30">
-              <Compass className="w-8 h-8 opacity-40 animate-spin" style={{ animationDuration: '20s' }} />
-            </div>
+            {/* Pre-trip Checklist */}
+            <div className="bg-[#131416] border border-white/8 rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-sm font-bold text-white">Pre-Trip Checklist</h2>
+                  <p className="text-[10px] text-gray-500 mt-0.5">{checkDone}/{CHECKLIST.length} items ready</p>
+                </div>
+                <div className={`w-9 h-9 rounded-full flex items-center justify-center text-sm font-black border ${
+                  checkDone === CHECKLIST.length ? 'bg-emerald-500/20 border-emerald-500/30 text-emerald-400' : 'bg-white/5 border-white/10 text-gray-400'
+                }`}>
+                  {checkDone === CHECKLIST.length ? '✓' : checkDone}
+                </div>
+              </div>
 
-            <h2 className="font-label-caps text-[10px] text-on-surface-variant tracking-wider uppercase mb-1">CONVOY PROGRESS</h2>
-            <div className="flex items-end gap-1.5 mb-3">
-              <span className="font-display-lg text-4xl font-extrabold text-on-surface">{progressPct}</span>
-              <span className="font-title-md text-sm text-primary pb-1">% completed</span>
-            </div>
+              {/* Progress bar */}
+              <div className="w-full bg-white/5 rounded-full h-1 mb-4 overflow-hidden">
+                <div
+                  className="h-1 rounded-full bg-gradient-to-r from-blue-500 to-emerald-400 transition-all duration-500"
+                  style={{ width: `${(checkDone / CHECKLIST.length) * 100}%` }}
+                />
+              </div>
 
-            <div className="w-full bg-surface-container-highest rounded-full h-1.5 mb-1.5 overflow-hidden">
-              <div className="bg-primary h-1.5 rounded-full shadow-[0_0_10px_rgba(173,198,255,0.5)] transition-all duration-500" style={{ width: `${progressPct}%` }}></div>
-            </div>
-            <p className="font-label-caps text-[9px] text-on-surface-variant text-right">
-              {doneCount} of {waypoints.length} Sector Waypoints Passed
-            </p>
-          </section>
-
-          {/* Tab Navigation */}
-          <nav className="flex p-1 bg-surface-container-low rounded-lg border border-outline-variant/30 pointer-events-auto">
-            <button 
-              className={`flex-1 py-2 font-label-caps text-xs text-center rounded transition-all duration-300 cursor-pointer ${
-                activeTab === 'waypoints'
-                  ? 'bg-primary/20 text-primary border border-primary/50 shadow-[0_0_10px_rgba(59,130,246,0.2)]'
-                  : 'text-on-surface-variant hover:text-on-surface border border-transparent'
-              }`} 
-              onClick={() => setActiveTab('waypoints')}
-            >
-              WAYPOINTS
-            </button>
-            <button 
-              className={`flex-1 py-2 font-label-caps text-xs text-center rounded transition-all duration-300 cursor-pointer ${
-                activeTab === 'ledger'
-                  ? 'bg-primary/20 text-primary border border-primary/50 shadow-[0_0_10px_rgba(59,130,246,0.2)]'
-                  : 'text-on-surface-variant hover:text-on-surface border border-transparent'
-              }`} 
-              onClick={() => setActiveTab('ledger')}
-            >
-              LEDGER
-            </button>
-            <button 
-              className={`flex-1 py-2 font-label-caps text-xs text-center rounded transition-all duration-300 cursor-pointer ${
-                activeTab === 'crew'
-                  ? 'bg-primary/20 text-primary border border-primary/50 shadow-[0_0_10px_rgba(59,130,246,0.2)]'
-                  : 'text-on-surface-variant hover:text-on-surface border border-transparent'
-              }`} 
-              onClick={() => setActiveTab('crew')}
-            >
-              CREW
-            </button>
-          </nav>
-
-          {/* Tab Contents */}
-          <div className="relative min-h-[400px] pointer-events-auto">
-            
-            {/* WAYPOINTS Tab */}
-            {activeTab === 'waypoints' && (
-              <div className="pl-6 relative before:absolute before:left-[11px] before:top-2 before:bottom-2 before:w-0.5 before:bg-outline-variant/30">
-                {waypoints.map((wp) => (
-                  <div key={wp.id} className="relative mb-6 last:mb-0">
-                    {/* Tick checkbox */}
-                    <button 
-                      onClick={() => toggleWaypoint(wp.id)}
-                      className={`absolute -left-[35px] top-1 w-5 h-5 rounded-full border-2 flex items-center justify-center cursor-pointer transition-all ${
-                        wp.done 
-                          ? 'bg-primary border-primary shadow-[0_0_10px_rgba(173,198,255,0.4)] text-black' 
-                          : 'bg-background border-outline-variant text-transparent hover:border-primary/50'
-                      }`}
-                    >
-                      {wp.done && <span className="text-[10px] font-bold">✓</span>}
-                    </button>
-
-                    <div className={`bg-surface-container border rounded-lg p-4 transition-all ${
-                      wp.done 
-                        ? 'border-primary/40 shadow-[0_4px_15px_rgba(59,130,246,0.08)] opacity-90' 
-                        : 'border-outline-variant/20 opacity-60'
-                    }`}>
-                      <div className="flex justify-between items-start">
-                        <h3 className={`font-title-md text-sm ${wp.done ? 'text-primary' : 'text-on-surface'}`}>
-                          {wp.name}
-                        </h3>
-                        <MapPin className={`w-4 h-4 ${wp.done ? 'text-primary' : 'text-gray-500'}`} />
-                      </div>
-                      
-                      <p className="font-label-caps text-[10px] text-on-surface-variant mt-1">
-                        Est. {wp.time} • {wp.distance}
-                      </p>
-
-                      {(wp.fuel || wp.food) && (
-                        <div className="flex gap-2 mt-3">
-                          {wp.fuel && (
-                            <span className="px-2 py-0.5 bg-surface-container-high rounded text-[9px] font-label-caps text-secondary-fixed flex items-center gap-1 border border-outline-variant/30">
-                              ⛽ Fuel
-                            </span>
-                          )}
-                          {wp.food && (
-                            <span className="px-2 py-0.5 bg-surface-container-high rounded text-[9px] font-label-caps text-secondary-fixed flex items-center gap-1 border border-outline-variant/30">
-                              🍽️ Food
-                            </span>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
+              <div className="grid grid-cols-2 gap-2">
+                {CHECKLIST.map(item => (
+                  <button
+                    key={item.id}
+                    onClick={() => toggleCheck(item.id)}
+                    className={`flex items-center gap-2 p-2.5 rounded-xl border text-left text-xs transition-all cursor-pointer active:scale-95 ${
+                      checklist[item.id]
+                        ? 'bg-emerald-500/10 border-emerald-500/25 text-emerald-400'
+                        : 'bg-white/3 border-white/8 text-gray-400 hover:text-white hover:border-white/15'
+                    }`}
+                  >
+                    {checklist[item.id]
+                      ? <CheckCircle2 size={13} className="shrink-0" />
+                      : <Circle size={13} className="shrink-0 opacity-50" />
+                    }
+                    <span className="font-medium leading-tight">{item.label}</span>
+                  </button>
                 ))}
               </div>
-            )}
+            </div>
 
-            {/* LEDGER Tab */}
-            {activeTab === 'ledger' && (
-              <div className="space-y-4">
-                
-                {/* Total Cost Display */}
-                <div className="bg-primary/5 border border-primary/30 rounded-xl p-5 flex flex-col items-center justify-center shadow-[0_0_15px_rgba(173,198,255,0.15)]">
-                  <span className="font-label-caps text-[10px] text-primary uppercase tracking-wider mb-0.5">Total Trip Cost</span>
-                  <span className="font-display-lg text-4xl font-extrabold text-on-surface tracking-tight">
-                    Rs. {totalCost.toFixed(2)}
-                  </span>
+            {/* Fuel Estimator */}
+            <div className="bg-[#131416] border border-white/8 rounded-2xl p-5">
+              <h2 className="text-sm font-bold text-white mb-3">⛽ Fuel Estimator</h2>
+              {trip.distanceKm ? (
+                <div className="space-y-3">
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-400">Total Distance</span>
+                    <span className="font-bold text-white">{trip.distanceKm} km</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-400">Fuel needed <span className="text-gray-600">(avg 35 km/l)</span></span>
+                    <span className="font-bold text-yellow-400">{fuelEst?.litres} L</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-400">Estimated cost <span className="text-gray-600">(₹105/L)</span></span>
+                    <span className="font-bold text-emerald-400">₹{fuelEst?.cost}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-xs">
+                    <span className="text-gray-400">Per member <span className="text-gray-600">({trip.members?.length} riders)</span></span>
+                    <span className="font-bold text-blue-400">₹{Math.round((fuelEst?.cost || 0) / (trip.members?.length || 1))}</span>
+                  </div>
                 </div>
+              ) : (
+                <p className="text-xs text-gray-500 italic">Add distance in km to see fuel estimates. (Set trip distance when creating.)</p>
+              )}
+            </div>
 
-                {/* Net Debt settlement suggestions */}
-                <div className="p-4 rounded-xl bg-surface-container-low border border-outline-variant/20">
-                  <h4 className="font-label-caps text-[10px] text-primary uppercase tracking-widest mb-3">Settlement Ledger</h4>
-                  {settlements.length === 0 ? (
-                    <p className="text-xs text-on-surface-variant italic">All accounts fully balanced. No transfers needed.</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {settlements.map((s, idx) => (
-                        <div key={idx} className="p-2.5 rounded-lg bg-surface-container-high border border-outline-variant/30 flex items-center justify-between text-xs">
-                          <div>
-                            <strong className="text-white">{s.from}</strong>
-                            <span className="text-gray-400 mx-1">pays</span>
-                            <strong className="text-white">{s.to}</strong>
-                          </div>
-                          <span className="text-primary font-bold">Rs. {s.amount}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
+            {/* Trip Notes */}
+            <div className="bg-[#131416] border border-white/8 rounded-2xl p-5">
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-bold text-white">Trip Notes</h2>
+                <span className={`text-[9px] font-mono transition-opacity ${notesSaving ? 'text-blue-400 opacity-100' : 'text-gray-600 opacity-0'}`}>
+                  Saving...
+                </span>
+              </div>
+              <textarea
+                value={notes}
+                onChange={e => handleNotesChange(e.target.value)}
+                placeholder="Emergency contacts, meetup points, important reminders..."
+                rows={4}
+                className="w-full bg-white/4 border border-white/8 rounded-xl p-3 text-xs text-white placeholder-gray-600 resize-none outline-none focus:border-blue-500/40 focus:ring-1 focus:ring-blue-500/20 transition-all"
+              />
+            </div>
+
+            {/* SOS Section */}
+            <div className="bg-[#131416] border border-red-500/20 rounded-2xl p-5">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                    <AlertTriangle size={15} className="text-red-400" /> SOS / Emergency
+                  </h2>
+                  <p className="text-[10px] text-gray-500 mt-1">Alert all crew members of an emergency</p>
                 </div>
+                <button
+                  onClick={() => {
+                    setSosActive(true);
+                    setTimeout(() => setSosActive(false), 5000);
+                    alert('🚨 SOS signal would be broadcast to all crew! (Connect to your socket for real dispatch)');
+                  }}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer active:scale-95 ${
+                    sosActive
+                      ? 'bg-red-500 border-red-400 text-white animate-pulse'
+                      : 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
+                  }`}
+                >
+                  {sosActive ? '🚨 SOS SENT' : '🆘 SOS'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
-                {/* Actual MERN Expenses List */}
-                <div className="space-y-2">
-                  <h4 className="font-label-caps text-[10px] text-on-surface-variant uppercase tracking-widest">Logged Payments</h4>
-                  
-                  {expenses.length === 0 ? (
-                    <p className="text-xs text-on-surface-variant italic py-6 text-center">No transactions logged yet.</p>
-                  ) : (
-                    expenses.map((exp) => {
-                      const isPayer = exp.paidBy._id === user._id;
-                      const isAdmin = trip.admin._id === user._id;
-                      
-                      return (
-                        <div key={exp._id} className="flex items-center justify-between p-3.5 bg-surface-container/50 border border-outline-variant/20 rounded-lg group hover:border-primary/20 transition-all">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 rounded-full bg-surface-container-high flex items-center justify-center border border-outline-variant">
-                              <CreditCard className="w-4 h-4 text-on-surface-variant" />
-                            </div>
-                            <div>
-                              <p className="font-title-md text-xs text-on-surface">{exp.description}</p>
-                              <p className="font-label-caps text-[9px] text-on-surface-variant mt-0.5">
-                                {exp.paidBy.name} • {exp.date ? new Date(exp.date).toLocaleDateString() : ''}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2.5">
-                            <span className="font-stats-lg text-sm text-on-surface">Rs. {exp.amount.toFixed(2)}</span>
-                            {(isPayer || isAdmin) && (
-                              <button 
-                                onClick={() => handleDeleteExpense(exp._id)}
-                                className="text-gray-500 hover:text-red-400 transition-colors p-1 rounded hover:bg-red-500/5 cursor-pointer"
-                              >
-                                <Trash2 className="w-3.5 h-3.5" />
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
+        {/* ══════════════════ STOPS TAB ══════════════════ */}
+        {activeTab === 'stops' && (
+          <div className="space-y-3">
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-sm font-semibold text-white">Planned Stops</h2>
+                <p className="text-[10px] text-gray-500 mt-0.5">{reached} of {totalWp} reached</p>
+              </div>
+              <button
+                onClick={() => setShowWpModal(true)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl text-xs font-bold cursor-pointer hover:bg-blue-500/30 active:scale-95 transition-all"
+              >
+                <Plus size={13} /> Add Stop
+              </button>
+            </div>
 
+            {trip.waypoints?.length === 0 && (
+              <div className="text-center py-12 text-gray-600">
+                <MapPin className="w-10 h-10 mx-auto mb-3 opacity-30" />
+                <p className="text-sm">No stops added yet.</p>
+                <p className="text-xs mt-1 text-gray-700">Add fuel stops, food breaks, and checkpoints.</p>
               </div>
             )}
 
-            {/* CREW Tab */}
-            {activeTab === 'crew' && (
-              <div className="space-y-6">
-                
-                {/* Admin options - invite members */}
-                {trip.admin._id === user._id && (
-                  <div className="p-4 rounded-xl bg-surface-container-low border border-outline-variant/20">
-                    <h4 className="font-label-caps text-[10px] text-primary uppercase tracking-widest mb-3">Invite Coordinator</h4>
-                    <form onSubmit={handleAddMember} className="flex gap-2">
-                      <label htmlFor="member-email" className="sr-only">Invite Coordinator Email</label>
-                      <input 
-                        type="email" 
-                        id="member-email"
-                        name="email"
-                        autocomplete="email"
-                        value={memberEmail}
-                        onChange={(e) => setMemberEmail(e.target.value)}
-                        placeholder="rider@convoy.net"
-                        className="flex-grow rounded-lg border border-outline-variant bg-surface-container-lowest py-2 px-3 text-xs outline-none focus:border-primary focus:ring-1 focus:ring-primary text-white"
-                      />
-                      <button 
-                        type="submit"
-                        disabled={loadingMember}
-                        className="px-4 bg-primary/20 hover:bg-primary border border-primary text-primary hover:text-black font-semibold text-xs rounded-lg transition-colors flex items-center justify-center gap-1 cursor-pointer"
-                      >
-                        {loadingMember ? (
-                          <div className="h-4 w-4 animate-spin rounded-full border border-current border-t-transparent"></div>
-                        ) : (
-                          <>
-                            <UserPlus className="w-3.5 h-3.5" />
-                            Invite
-                          </>
-                        )}
-                      </button>
-                    </form>
-                    {memberError && <p className="text-[10px] text-red-400 mt-2">{memberError}</p>}
-                  </div>
-                )}
+            {/* Timeline */}
+            <div className="relative pl-5 before:absolute before:left-[9px] before:top-2 before:bottom-2 before:w-0.5 before:bg-white/8">
+              {trip.waypoints?.map((wp, idx) => {
+                const cfg = WP_TYPES[wp.type] || WP_TYPES.custom;
+                return (
+                  <motion.div
+                    key={wp._id}
+                    initial={{ opacity: 0, x: -10 }}
+                    animate={{ opacity: 1, x: 0 }}
+                    transition={{ delay: idx * 0.04 }}
+                    className="relative mb-4 last:mb-0"
+                  >
+                    {/* Timeline dot */}
+                    <button
+                      onClick={() => toggleWpReached(wp._id)}
+                      className={`absolute -left-[23px] top-3 w-5 h-5 rounded-full border-2 flex items-center justify-center text-[10px] transition-all cursor-pointer ${
+                        wp.reached
+                          ? 'bg-emerald-500 border-emerald-400 text-white'
+                          : 'bg-[#131416] border-white/20 text-transparent hover:border-blue-400'
+                      }`}
+                    >
+                      {wp.reached && '✓'}
+                    </button>
 
-                {/* Grid of Crew members */}
-                <div className="grid grid-cols-2 gap-4">
-                  {trip.members?.map((member) => (
-                    <div key={member._id} className="bg-surface-container/60 border border-outline-variant/30 rounded-lg p-4 flex flex-col items-center text-center">
-                      <div className="w-16 h-16 rounded-full mb-3 border-2 border-outline-variant p-0.5 shadow-[0_0_10px_rgba(173,198,255,0.1)] flex items-center justify-center bg-surface-container-highest">
-                        <span className="text-2xl text-on-surface-variant">👤</span>
+                    <div className={`bg-[#131416] border rounded-xl p-4 transition-all ${wp.reached ? 'border-emerald-500/20 opacity-75' : 'border-white/8'}`}>
+                      <div className="flex justify-between items-start">
+                        <div className="flex items-center gap-2 flex-1 min-w-0">
+                          <span className={`shrink-0 text-sm w-7 h-7 rounded-lg flex items-center justify-center ${cfg.bg} border ${cfg.border}`}>
+                            {cfg.icon}
+                          </span>
+                          <div className="min-w-0">
+                            <p className={`text-xs font-bold truncate ${wp.reached ? 'line-through text-gray-500' : 'text-white'}`}>
+                              {wp.name}
+                            </p>
+                            <p className={`text-[9px] font-mono ${cfg.color} mt-0.5`}>{cfg.label}</p>
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2 shrink-0 ml-2">
+                          {wp.estimatedTime && (
+                            <span className="text-[9px] text-gray-500 font-mono">{wp.estimatedTime}</span>
+                          )}
+                          <button
+                            onClick={() => deleteWaypoint(wp._id)}
+                            className="w-5 h-5 rounded flex items-center justify-center text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                          >
+                            <X size={11} />
+                          </button>
+                        </div>
                       </div>
-                      
-                      <h3 className="font-title-md text-sm text-on-surface truncate w-full">{member.name}</h3>
-                      <p className="font-label-caps text-[9px] text-primary mt-1 truncate w-full">{member.email}</p>
-                      
-                      {trip.admin._id === member._id && (
-                        <span className="text-[8px] font-bold uppercase bg-primary/10 text-primary border border-primary/20 px-1.5 py-0.5 rounded mt-2">
-                          Lead Admin
-                        </span>
+                      {wp.note && (
+                        <p className="text-[10px] text-gray-500 mt-2 pl-9 leading-relaxed">{wp.note}</p>
                       )}
+                      {wp.reached && wp.reachedAt && (
+                        <p className="text-[9px] text-emerald-500 mt-1 pl-9 font-mono">
+                          ✓ Reached at {new Date(wp.reachedAt).toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}
+                        </p>
+                      )}
+                    </div>
+                  </motion.div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* ══════════════════ LEDGER TAB ══════════════════ */}
+        {activeTab === 'ledger' && (
+          <div className="space-y-4">
+
+            {/* Total */}
+            <div className="bg-[#131416] border border-blue-500/20 rounded-2xl p-5 flex justify-between items-center">
+              <div>
+                <p className="text-[10px] uppercase tracking-widest text-gray-500 font-mono mb-1">Total Convoy Spend</p>
+                <p className="text-3xl font-black text-white">₹{totalCost.toFixed(2)}</p>
+              </div>
+              <button
+                onClick={() => setShowExpenseModal(true)}
+                className="flex items-center gap-2 px-4 py-2.5 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl text-xs font-bold cursor-pointer hover:bg-blue-500/30 active:scale-95 transition-all"
+              >
+                <Plus size={14} /> Add
+              </button>
+            </div>
+
+            {/* Settlements */}
+            {settlements.length > 0 && (
+              <div className="bg-[#131416] border border-white/8 rounded-2xl p-5">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Settlement Plan</h3>
+                <div className="space-y-2">
+                  {settlements.map((s, idx) => (
+                    <div key={idx} className="flex items-center justify-between p-3 bg-white/3 rounded-xl border border-white/6 text-xs">
+                      <div>
+                        <span className="text-white font-semibold">{s.from}</span>
+                        <span className="text-gray-500 mx-1.5">→</span>
+                        <span className="text-white font-semibold">{s.to}</span>
+                      </div>
+                      <span className="text-emerald-400 font-bold">₹{s.amount}</span>
                     </div>
                   ))}
                 </div>
-
               </div>
             )}
 
+            {/* Expenses list */}
+            <div className="space-y-2">
+              <h3 className="text-xs font-bold text-gray-500 uppercase tracking-widest">Logged Payments</h3>
+              {expenses.length === 0 ? (
+                <div className="text-center py-10 text-gray-600">
+                  <DollarSign className="w-8 h-8 mx-auto mb-2 opacity-30" />
+                  <p className="text-xs">No expenses logged yet.</p>
+                </div>
+              ) : (
+                expenses.map(exp => {
+                  const isPayer = exp.paidBy._id === user._id;
+                  const isAdm   = trip.admin._id === user._id;
+                  return (
+                    <div key={exp._id} className="flex items-center justify-between p-3.5 bg-[#131416] border border-white/8 rounded-xl group hover:border-white/12 transition-all">
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-white/5 flex items-center justify-center border border-white/8">
+                          <CreditCard size={13} className="text-gray-400" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-semibold text-white">{exp.description}</p>
+                          <p className="text-[9px] text-gray-500 mt-0.5">
+                            {exp.paidBy.name} • {exp.date ? new Date(exp.date).toLocaleDateString('en-IN') : ''}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <span className="text-sm font-bold text-white">₹{exp.amount.toFixed(2)}</span>
+                        {(isPayer || isAdm) && (
+                          <button
+                            onClick={() => handleDeleteExpense(exp._id)}
+                            className="w-6 h-6 rounded flex items-center justify-center text-gray-600 hover:text-red-400 hover:bg-red-500/10 transition-all cursor-pointer"
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
           </div>
-        </div>
-
-        {/* Contextual FAB for adding expense (visible when Ledger tab is active) */}
-        {activeTab === 'ledger' && (
-          <button 
-            onClick={() => setShowExpenseModal(true)}
-            className="fixed bottom-6 right-6 w-14 h-14 bg-primary text-on-primary rounded-full shadow-[0_0_20px_rgba(59,130,246,0.6)] flex items-center justify-center hover:bg-primary-fixed transition-all active:scale-95 duration-200 z-50 cursor-pointer"
-          >
-            <Plus className="w-7 h-7 text-black" />
-          </button>
         )}
 
-      </main>
+        {/* ══════════════════ CREW TAB ══════════════════ */}
+        {activeTab === 'crew' && (
+          <div className="space-y-4">
 
-      {/* Add Expense Modal */}
-      <AnimatePresence>
-        {showExpenseModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-black/60 backdrop-blur-md">
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.95, opacity: 0 }}
-              className="glass-panel w-full max-w-md rounded-3xl p-6 border border-white/10 shadow-2xl backdrop-blur-2xl pointer-events-auto"
-            >
-              <h2 className="text-lg font-bold text-white mb-4">Log New Expense</h2>
+            {/* Invite — admin only */}
+            {isAdmin && (
+              <div className="bg-[#131416] border border-white/8 rounded-2xl p-5">
+                <h3 className="text-xs font-bold text-gray-400 uppercase tracking-widest mb-3">Invite Rider</h3>
+                <form onSubmit={handleAddMember} className="flex gap-2">
+                  <input
+                    type="email"
+                    value={memberEmail}
+                    onChange={e => setMemberEmail(e.target.value)}
+                    placeholder="rider@example.com"
+                    className="flex-1 bg-white/5 border border-white/10 rounded-xl py-2.5 px-3 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500/40 transition-all"
+                  />
+                  <button
+                    type="submit"
+                    disabled={loadingMember}
+                    className="px-4 py-2.5 bg-blue-500/20 border border-blue-500/30 text-blue-400 rounded-xl text-xs font-bold cursor-pointer hover:bg-blue-500/30 active:scale-95 transition-all flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    {loadingMember ? <div className="h-3 w-3 border border-current border-t-transparent rounded-full animate-spin" /> : <><UserPlus size={12} /> Invite</>}
+                  </button>
+                </form>
+                {memberError && <p className="text-[10px] text-red-400 mt-2">{memberError}</p>}
+              </div>
+            )}
 
-              {expenseError && (
-                <div className="mb-3 rounded-lg bg-red-500/10 border border-red-500/20 px-3 py-1.5 text-xs text-red-400">
-                  {expenseError}
+            {/* Crew grid */}
+            <div className="grid grid-cols-2 gap-3">
+              {trip.members?.map(member => (
+                <div key={member._id} className="bg-[#131416] border border-white/8 rounded-2xl p-4 flex flex-col items-center text-center gap-2">
+                  <div className="w-14 h-14 rounded-full bg-white/5 border border-white/10 flex items-center justify-center text-xl">
+                    {member.name?.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="text-xs font-bold text-white">{member.name}</p>
+                    <p className="text-[9px] text-gray-500 truncate max-w-[110px]">{member.email}</p>
+                    {trip.admin._id === member._id && (
+                      <span className="inline-block mt-1 text-[8px] font-bold bg-blue-500/10 text-blue-400 border border-blue-500/20 px-1.5 py-0.5 rounded">
+                        Lead
+                      </span>
+                    )}
+                  </div>
                 </div>
-              )}
+              ))}
+            </div>
+          </div>
+        )}
 
-              <form onSubmit={handleAddExpense} className="space-y-4">
-                <div className="space-y-1">
-                  <label htmlFor="expense-description" className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Description</label>
+      </div>
+
+      {/* ══════════════════ ADD WAYPOINT MODAL ══════════════════ */}
+      <AnimatePresence>
+        {showWpModal && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center px-4 pb-8 bg-black/60 backdrop-blur-md" onClick={() => setShowWpModal(false)}>
+            <motion.div
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 35 }}
+              className="bg-[#131416] border border-white/10 rounded-3xl p-6 w-full max-w-md"
+              onClick={e => e.stopPropagation()}
+            >
+              <h2 className="text-base font-bold text-white mb-4">Add Stop</h2>
+              <form onSubmit={handleAddWaypoint} className="space-y-3">
+                <input
+                  type="text"
+                  value={wpName}
+                  onChange={e => setWpName(e.target.value)}
+                  placeholder="Stop name (e.g. HP Petrol, Udupi Hotel)"
+                  required
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500/40 transition-all"
+                />
+
+                {/* Type selector */}
+                <div className="grid grid-cols-5 gap-1.5">
+                  {Object.entries(WP_TYPES).map(([key, cfg]) => (
+                    <button
+                      key={key}
+                      type="button"
+                      onClick={() => setWpType(key)}
+                      className={`flex flex-col items-center gap-1 p-2 rounded-xl border text-[9px] font-bold transition-all cursor-pointer ${
+                        wpType === key ? `${cfg.bg} ${cfg.border} ${cfg.color}` : 'bg-white/3 border-white/8 text-gray-500'
+                      }`}
+                    >
+                      <span className="text-base">{cfg.icon}</span>
+                      <span className="truncate w-full text-center">{cfg.label.split(' ')[0]}</span>
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-2 gap-2">
                   <input
                     type="text"
-                    id="expense-description"
-                    name="description"
-                    value={expenseDesc}
-                    onChange={(e) => setExpenseDesc(e.target.value)}
-                    placeholder="e.g. Fuel Stop #1, Dinner"
-                    className="glass-input w-full py-2 px-3 text-xs text-white"
+                    value={wpTime}
+                    onChange={e => setWpTime(e.target.value)}
+                    placeholder="Est. time (e.g. 2:00 PM)"
+                    className="bg-white/5 border border-white/10 rounded-xl py-2.5 px-3 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500/40 transition-all"
+                  />
+                  <input
+                    type="text"
+                    value={wpNote}
+                    onChange={e => setWpNote(e.target.value)}
+                    placeholder="Note (optional)"
+                    className="bg-white/5 border border-white/10 rounded-xl py-2.5 px-3 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500/40 transition-all"
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1">
-                    <label htmlFor="expense-amount" className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Amount (Rs)</label>
-                    <input
-                      type="number"
-                      step="0.01"
-                      id="expense-amount"
-                      name="amount"
-                      value={expenseAmount}
-                      onChange={(e) => setExpenseAmount(e.target.value)}
-                      placeholder="0.00"
-                      className="glass-input w-full py-2 px-3 text-xs text-white"
-                    />
-                  </div>
-
-                  <div className="space-y-1">
-                    <label htmlFor="expense-payer" className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Paid By</label>
-                    <select
-                      id="expense-payer"
-                      name="paidBy"
-                      value={expensePayer}
-                      onChange={(e) => setExpensePayer(e.target.value)}
-                      className="glass-input w-full py-2 px-3 text-xs text-white bg-[#12141c]"
-                    >
-                      {trip.members?.map(m => (
-                        <option key={m._id} value={m._id}>{m.name}</option>
-                      ))}
-                    </select>
-                  </div>
+                <div className="flex gap-2 pt-1">
+                  <button type="button" onClick={() => setShowWpModal(false)}
+                    className="flex-1 py-3 rounded-xl border border-white/10 text-xs font-bold text-gray-400 hover:text-white cursor-pointer transition-all">
+                    Cancel
+                  </button>
+                  <button type="submit" disabled={wpLoading}
+                    className="flex-1 py-3 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold cursor-pointer transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5">
+                    {wpLoading ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : <><Plus size={13} /> Add Stop</>}
+                  </button>
                 </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider">Split Among</label>
-                  <div className="max-h-28 overflow-y-auto p-2 rounded-xl bg-white/3 border border-white/5 space-y-2">
-                    {trip.members?.map((m) => {
-                      const isChecked = expenseSplit.includes(m._id);
+      {/* ══════════════════ ADD EXPENSE MODAL ══════════════════ */}
+      <AnimatePresence>
+        {showExpenseModal && (
+          <div className="fixed inset-0 z-50 flex items-end justify-center px-4 pb-8 bg-black/60 backdrop-blur-md" onClick={() => setShowExpenseModal(false)}>
+            <motion.div
+              initial={{ y: 100, opacity: 0 }}
+              animate={{ y: 0, opacity: 1 }}
+              exit={{ y: 100, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 35 }}
+              className="bg-[#131416] border border-white/10 rounded-3xl p-6 w-full max-w-md"
+              onClick={e => e.stopPropagation()}
+            >
+              <h2 className="text-base font-bold text-white mb-4">Log Expense</h2>
+              {expenseError && <p className="text-xs text-red-400 mb-3 bg-red-500/10 border border-red-500/20 rounded-xl px-3 py-2">{expenseError}</p>}
+              <form onSubmit={handleAddExpense} className="space-y-3">
+                <input type="text" value={expenseDesc} onChange={e => setExpenseDesc(e.target.value)}
+                  placeholder="Description (e.g. Fuel, Dinner)" required
+                  className="w-full bg-white/5 border border-white/10 rounded-xl py-3 px-4 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500/40 transition-all" />
+                <div className="grid grid-cols-2 gap-2">
+                  <input type="number" step="0.01" value={expenseAmount} onChange={e => setExpenseAmount(e.target.value)}
+                    placeholder="Amount (₹)" required
+                    className="bg-white/5 border border-white/10 rounded-xl py-2.5 px-3 text-xs text-white placeholder-gray-600 outline-none focus:border-blue-500/40 transition-all" />
+                  <select value={expensePayer} onChange={e => setExpensePayer(e.target.value)}
+                    className="bg-[#1a1b1e] border border-white/10 rounded-xl py-2.5 px-3 text-xs text-white outline-none focus:border-blue-500/40 transition-all cursor-pointer">
+                    {trip.members?.map(m => <option key={m._id} value={m._id}>{m.name}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <p className="text-[9px] uppercase text-gray-500 font-mono mb-2">Split Among</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {trip.members?.map(m => {
+                      const sel = expenseSplit.includes(m._id);
                       return (
-                        <label key={m._id} className="flex items-center gap-2 text-xs text-white cursor-pointer select-none">
-                          <input
-                            type="checkbox"
-                            checked={isChecked}
-                            onChange={() => {
-                              if (isChecked) {
-                                setExpenseSplit(expenseSplit.filter(id => id !== m._id));
-                              } else {
-                                setExpenseSplit([...expenseSplit, m._id]);
-                              }
-                            }}
-                            className="rounded border-gray-600 text-emerald-500 focus:ring-emerald-500 bg-black"
-                          />
-                          <span>{m.name}</span>
-                        </label>
+                        <button key={m._id} type="button"
+                          onClick={() => setExpenseSplit(sel ? expenseSplit.filter(x => x !== m._id) : [...expenseSplit, m._id])}
+                          className={`px-2.5 py-1 rounded-lg text-[10px] font-semibold border cursor-pointer transition-all active:scale-95 ${
+                            sel ? 'bg-blue-500/20 border-blue-500/30 text-blue-400' : 'bg-white/4 border-white/10 text-gray-500 hover:text-white'
+                          }`}>
+                          {m.name}
+                        </button>
                       );
                     })}
                   </div>
                 </div>
-
-                <div className="flex gap-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowExpenseModal(false)}
-                    className="flex-1 py-2 rounded-xl text-xs font-bold border border-white/10 text-gray-400 hover:text-white transition-colors cursor-pointer"
-                  >
+                <div className="flex gap-2 pt-1">
+                  <button type="button" onClick={() => setShowExpenseModal(false)}
+                    className="flex-1 py-3 rounded-xl border border-white/10 text-xs font-bold text-gray-400 hover:text-white cursor-pointer transition-all">
                     Cancel
                   </button>
-                  <button
-                    type="submit"
-                    disabled={loadingExpense}
-                    className="flex-1 py-2 btn-neon text-black rounded-xl text-xs font-bold flex items-center justify-center gap-1 cursor-pointer"
-                  >
-                    {loadingExpense ? (
-                      <div className="h-4 w-4 animate-spin rounded-full border-2 border-black border-t-transparent"></div>
-                    ) : (
-                      'Log Expense'
-                    )}
+                  <button type="submit" disabled={loadingExpense}
+                    className="flex-1 py-3 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold cursor-pointer transition-all active:scale-95 disabled:opacity-50 flex items-center justify-center gap-1.5">
+                    {loadingExpense ? <div className="w-4 h-4 border-2 border-white/40 border-t-white rounded-full animate-spin" /> : 'Log Expense'}
                   </button>
                 </div>
               </form>

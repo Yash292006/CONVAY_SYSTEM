@@ -169,4 +169,89 @@ router.delete('/:id/expenses/:expenseId', protect, async (req, res) => {
   }
 });
 
+// @desc    Update trip status
+// @route   PATCH /api/trips/:id/status
+// @access  Private
+router.patch('/:id/status', protect, async (req, res) => {
+  const { status } = req.body;
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) return res.status(404).json({ message: 'Trip not found' });
+    if (trip.admin.toString() !== req.user._id.toString()) {
+      return res.status(403).json({ message: 'Only the convoy lead can change status' });
+    }
+    trip.status = status;
+    await trip.save();
+    res.json({ status: trip.status });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @desc    Update trip notes
+// @route   PATCH /api/trips/:id/notes
+// @access  Private
+router.patch('/:id/notes', protect, async (req, res) => {
+  const { notes } = req.body;
+  try {
+    const trip = await Trip.findByIdAndUpdate(
+      req.params.id,
+      { notes },
+      { new: true }
+    );
+    res.json({ notes: trip.notes });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @desc    Add waypoint to trip
+// @route   POST /api/trips/:id/waypoints
+// @access  Private
+router.post('/:id/waypoints', protect, async (req, res) => {
+  const { name, type, note, estimatedTime } = req.body;
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) return res.status(404).json({ message: 'Trip not found' });
+    trip.waypoints.push({ name, type: type || 'checkpoint', note: note || '', estimatedTime: estimatedTime || '' });
+    await trip.save();
+    res.status(201).json(trip.waypoints);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @desc    Toggle waypoint reached
+// @route   PATCH /api/trips/:id/waypoints/:wid/reached
+// @access  Private
+router.patch('/:id/waypoints/:wid/reached', protect, async (req, res) => {
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) return res.status(404).json({ message: 'Trip not found' });
+    const wp = trip.waypoints.id(req.params.wid);
+    if (!wp) return res.status(404).json({ message: 'Waypoint not found' });
+    wp.reached = !wp.reached;
+    wp.reachedAt = wp.reached ? new Date() : null;
+    await trip.save();
+    res.json(trip.waypoints);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @desc    Delete waypoint
+// @route   DELETE /api/trips/:id/waypoints/:wid
+// @access  Private
+router.delete('/:id/waypoints/:wid', protect, async (req, res) => {
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) return res.status(404).json({ message: 'Trip not found' });
+    trip.waypoints.pull({ _id: req.params.wid });
+    await trip.save();
+    res.json(trip.waypoints);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 export default router;
