@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useContext } from 'react';
+import React, { useState, useEffect, useRef, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import * as THREE from 'three';
 import { motion } from 'framer-motion';
 import { Receipt, ArrowRight, TrendingUp, MapPin } from 'lucide-react';
 import { AuthContext } from '../App';
 
-// Global Ledger: shows all expenses across all of the user's trips
 const LedgerView = () => {
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
@@ -13,16 +13,16 @@ const LedgerView = () => {
   const [trips,   setTrips]   = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const threeContainerRef = useRef(null);
+
   useEffect(() => { fetchAllTrips(); }, []);
 
   const fetchAllTrips = async () => {
     try {
       setLoading(true);
-      // Load all trips so we can collect all expenses
       const tripsRes = await axios.get('/trips');
       const tripList = tripsRes.data;
 
-      // Load expenses for each trip in parallel
       const withExpenses = await Promise.all(
         tripList.map(async (trip) => {
           try {
@@ -41,7 +41,120 @@ const LedgerView = () => {
     }
   };
 
-  // Flatten all expenses with their trip context
+  // Three.js 3D Grid Wave Data Visualization Background
+  useEffect(() => {
+    if (!threeContainerRef.current) return;
+
+    const container = threeContainerRef.current;
+    const width = container.clientWidth || window.innerWidth;
+    const height = container.clientHeight || window.innerHeight;
+
+    const scene = new THREE.Scene();
+    const camera = new THREE.PerspectiveCamera(75, width / height, 0.1, 1000);
+    camera.position.z = 10;
+    camera.position.y = 2;
+
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer.setSize(width, height);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    // Create wave grid
+    const gridGeometry = new THREE.BufferGeometry();
+    const count = 40;
+    const positions = new Float32Array(count * count * 3);
+    const colors = new Float32Array(count * count * 3);
+
+    const color1 = new THREE.Color(0x10b981); // Emerald
+    const color2 = new THREE.Color(0x3b82f6); // Blue
+
+    let index = 0;
+    for (let x = 0; x < count; x++) {
+      for (let z = 0; z < count; z++) {
+        positions[index * 3] = (x - count / 2) * 0.8;
+        positions[index * 3 + 1] = 0;
+        positions[index * 3 + 2] = (z - count / 2) * 0.8;
+
+        const mixVal = (x + z) / (count * 2);
+        const ptColor = color1.clone().lerp(color2, mixVal);
+        colors[index * 3] = ptColor.r;
+        colors[index * 3 + 1] = ptColor.g;
+        colors[index * 3 + 2] = ptColor.b;
+
+        index++;
+      }
+    }
+
+    gridGeometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+    gridGeometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+
+    const pCanvas = document.createElement('canvas');
+    pCanvas.width = 16;
+    pCanvas.height = 16;
+    const pCtx = pCanvas.getContext('2d');
+    const grad = pCtx.createRadialGradient(8, 8, 0, 8, 8, 8);
+    grad.addColorStop(0, 'rgba(255, 255, 255, 1)');
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    pCtx.fillStyle = grad;
+    pCtx.fillRect(0, 0, 16, 16);
+    const pTexture = new THREE.CanvasTexture(pCanvas);
+
+    const particleMaterial = new THREE.PointsMaterial({
+      size: 0.12,
+      vertexColors: true,
+      map: pTexture,
+      transparent: true,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false
+    });
+
+    const particles = new THREE.Points(gridGeometry, particleMaterial);
+    scene.add(particles);
+
+    let animId;
+    const animate = () => {
+      animId = requestAnimationFrame(animate);
+
+      const posAttr = gridGeometry.attributes.position;
+      const time = Date.now() * 0.0015;
+
+      for (let i = 0; i < posAttr.count; i++) {
+        const x = posAttr.getX(i);
+        const z = posAttr.getZ(i);
+        const y = Math.sin(x * 0.2 + time) * Math.cos(z * 0.2 + time) * 0.8;
+        posAttr.setY(i, y - 2);
+      }
+      posAttr.needsUpdate = true;
+
+      particles.rotation.y = time * 0.02;
+
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    const handleResize = () => {
+      if (!container) return;
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      camera.aspect = w / h;
+      camera.updateProjectionMatrix();
+      renderer.setSize(w, h);
+    };
+    window.addEventListener('resize', handleResize);
+
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      cancelAnimationFrame(animId);
+      gridGeometry.dispose();
+      particleMaterial.dispose();
+      pTexture.dispose();
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) {
+        container.removeChild(renderer.domElement);
+      }
+    };
+  }, []);
+
   const allExpenses = trips.flatMap(t =>
     t.expenses.map(e => ({ ...e, tripTitle: t.title, tripId: t._id }))
   ).sort((a, b) => new Date(b.date || b.createdAt) - new Date(a.date || a.createdAt));
@@ -51,7 +164,12 @@ const LedgerView = () => {
   const myTotal      = myExpenses.reduce((s, e) => s + e.amount, 0);
 
   return (
-    <div className="bg-[#0a0b0d] text-white min-h-screen antialiased pb-28">
+    <div className="bg-[#0a0b0d] text-white min-h-screen antialiased pb-28 relative">
+
+      {/* 3D Visualizer Wave Grid Background */}
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+        <div ref={threeContainerRef} className="fixed inset-0 w-full h-full bg-transparent" />
+      </div>
 
       {/* Header */}
       <header className="sticky top-0 z-40 bg-[#0a0b0d]/90 backdrop-blur-xl border-b border-white/5 px-5 py-4">
@@ -61,16 +179,16 @@ const LedgerView = () => {
         </div>
       </header>
 
-      <div className="max-w-screen-sm mx-auto px-4 pt-5 space-y-5">
+      <div className="relative z-10 max-w-screen-sm mx-auto px-4 pt-5 space-y-5">
 
         {/* Summary cards */}
         <div className="grid grid-cols-2 gap-3">
-          <div className="bg-[#131416] border border-emerald-500/15 rounded-2xl p-4">
+          <div className="bg-[#131416]/80 border border-emerald-500/15 rounded-2xl p-4 backdrop-blur-md">
             <p className="text-[9px] uppercase font-mono text-gray-500 mb-1">Total Spent</p>
             <p className="text-2xl font-black text-white">₹{totalSpend.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
             <p className="text-[9px] text-gray-600 mt-1">{allExpenses.length} transactions</p>
           </div>
-          <div className="bg-[#131416] border border-blue-500/15 rounded-2xl p-4">
+          <div className="bg-[#131416]/80 border border-blue-500/15 rounded-2xl p-4 backdrop-blur-md">
             <p className="text-[9px] uppercase font-mono text-gray-500 mb-1">Paid by You</p>
             <p className="text-2xl font-black text-blue-400">₹{myTotal.toLocaleString('en-IN', { maximumFractionDigits: 0 })}</p>
             <p className="text-[9px] text-gray-600 mt-1">{myExpenses.length} payments</p>
@@ -98,9 +216,9 @@ const LedgerView = () => {
                   initial={{ opacity: 0, y: 10 }}
                   animate={{ opacity: 1, y: 0 }}
                   transition={{ delay: idx * 0.05 }}
-                  className="bg-[#131416] border border-white/8 rounded-2xl overflow-hidden"
+                  className="bg-[#131416]/80 border border-white/8 rounded-2xl overflow-hidden backdrop-blur-md"
                 >
-                  {/* Trip header — clickable to go to trip */}
+                  {/* Trip header */}
                   <button
                     onClick={() => navigate(`/trips/${trip._id}`)}
                     className="w-full flex items-center justify-between px-4 py-3 hover:bg-white/3 transition-all cursor-pointer"

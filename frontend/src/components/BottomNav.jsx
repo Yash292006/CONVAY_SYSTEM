@@ -11,6 +11,7 @@ const BottomNav = () => {
 
   const navItems = [
     { path: '/',        icon: LayoutDashboard, label: 'Home'    },
+    { path: '/map/live', icon: Map,             label: 'Map'     },
     { path: '/friends', icon: Users,           label: 'Crew'    },
     { path: '/ledger',  icon: Receipt,         label: 'Ledger'  },
   ];
@@ -19,12 +20,11 @@ const BottomNav = () => {
     if (item.path === '/') {
       return location.pathname === '/' || location.pathname.startsWith('/trips/');
     }
+    if (item.path === '/map/live') {
+      return location.pathname.startsWith('/map/');
+    }
     return location.pathname.startsWith(item.path);
   };
-
-  // Don't show nav on map pages or trip pages with /map
-  const hideNav = location.pathname.startsWith('/map/');
-  if (hideNav) return null;
 
   return (
     <div className="fixed bottom-6 left-0 right-0 z-50 flex justify-center px-5">

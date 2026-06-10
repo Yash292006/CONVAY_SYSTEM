@@ -1,14 +1,81 @@
 import React, { useState, useEffect, useContext } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import * as THREE from 'three';
 import { AuthContext } from '../App';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Plus, MapPin, Users, Calendar, ArrowRight, LogOut, Bike, Activity, CheckCircle2 } from 'lucide-react';
+import { Plus, MapPin, Users, Calendar, ArrowRight, LogOut, Bike, Activity } from 'lucide-react';
 
 const STATUS_COLOR = {
   planning:  'text-yellow-400 bg-yellow-400/10 border-yellow-400/25',
   active:    'text-emerald-400 bg-emerald-400/10 border-emerald-400/25',
   completed: 'text-blue-400   bg-blue-400/10   border-blue-400/25',
+};
+
+const RadarBackground = () => {
+  const ref = React.useRef(null);
+  React.useEffect(() => {
+    let animId;
+    const container = ref.current;
+    if (!container) return;
+    const w = container.clientWidth || window.innerWidth;
+    const h = container.clientHeight || window.innerHeight;
+    const scene    = new THREE.Scene();
+    const camera   = new THREE.PerspectiveCamera(60, w / h, 0.1, 1000);
+    camera.position.z = 10;
+    const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
+    renderer.setSize(w, h);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    container.appendChild(renderer.domElement);
+
+    const group = new THREE.Group();
+    const geos = [], mats = [];
+
+    for (let i = 1; i <= 4; i++) {
+      const geo = new THREE.RingGeometry(i * 2 - 0.05, i * 2 + 0.05, 64);
+      const mat = new THREE.MeshBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.12 / i, side: THREE.DoubleSide });
+      const ring = new THREE.Mesh(geo, mat);
+      ring.rotation.x = Math.PI / 2.2;
+      group.add(ring);
+      geos.push(geo); mats.push(mat);
+    }
+    const lineGeo = new THREE.BufferGeometry().setFromPoints([
+      new THREE.Vector3(-10, 0, 0), new THREE.Vector3(10, 0, 0),
+      new THREE.Vector3(0, 0, -10), new THREE.Vector3(0, 0, 10),
+    ]);
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x3b82f6, transparent: true, opacity: 0.05 });
+    const grid = new THREE.LineSegments(lineGeo, lineMat);
+    grid.rotation.x = Math.PI / 2.2;
+    group.add(grid);
+    geos.push(lineGeo); mats.push(lineMat);
+    scene.add(group);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.3));
+
+    const animate = () => {
+      animId = requestAnimationFrame(animate);
+      group.rotation.z += 0.002;
+      group.rotation.y = Math.sin(Date.now() * 0.0005) * 0.15;
+      renderer.render(scene, camera);
+    };
+    animate();
+
+    const onResize = () => {
+      const nw = container.clientWidth, nh = container.clientHeight;
+      camera.aspect = nw / nh; camera.updateProjectionMatrix();
+      renderer.setSize(nw, nh);
+    };
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      window.removeEventListener('resize', onResize);
+      cancelAnimationFrame(animId);
+      geos.forEach(g => g.dispose());
+      mats.forEach(m => m.dispose());
+      renderer.dispose();
+      if (container.contains(renderer.domElement)) container.removeChild(renderer.domElement);
+    };
+  }, []);
+  return <div ref={ref} className="fixed inset-0 w-full h-full bg-transparent pointer-events-none" />;
 };
 
 const DashboardView = () => {
@@ -20,7 +87,6 @@ const DashboardView = () => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [filterStatus,    setFilterStatus]    = useState('all');
 
-  // Create form
   const [title,       setTitle]       = useState('');
   const [origin,      setOrigin]      = useState('');
   const [destination, setDestination] = useState('');
@@ -72,16 +138,18 @@ const DashboardView = () => {
   const activeCount    = trips.filter(t => t.status === 'active').length;
   const planningCount  = trips.filter(t => t.status === 'planning').length;
   const completedCount = trips.filter(t => t.status === 'completed').length;
-
-  const filteredTrips = filterStatus === 'all'
-    ? trips
-    : trips.filter(t => t.status === filterStatus);
+  const filteredTrips  = filterStatus === 'all' ? trips : trips.filter(t => t.status === filterStatus);
 
   return (
-    <div className="bg-[#0a0b0d] text-white min-h-screen antialiased pb-28">
+    <div className="bg-[#0a0b0d] text-white min-h-screen antialiased pb-28 relative">
+
+      {/* 3D Radar Grid Background */}
+      <div className="absolute inset-0 z-0 pointer-events-none overflow-hidden">
+        <RadarBackground />
+      </div>
 
       {/* ── HEADER ── */}
-      <header className="sticky top-0 z-40 bg-[#0a0b0d]/90 backdrop-blur-xl border-b border-white/5 px-5 py-4">
+      <header className="sticky top-0 z-40 bg-[#0a0b0d]/80 backdrop-blur-xl border-b border-white/5 px-5 py-4">
         <div className="max-w-screen-sm mx-auto flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
@@ -95,30 +163,29 @@ const DashboardView = () => {
           <button
             onClick={logout}
             className="w-9 h-9 rounded-full flex items-center justify-center bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all cursor-pointer active:scale-95"
-            title="Log Out"
           >
             <LogOut size={15} />
           </button>
         </div>
       </header>
 
-      <div className="max-w-screen-sm mx-auto px-4 pt-5 space-y-5">
+      <div className="relative z-10 max-w-screen-sm mx-auto px-4 pt-5 space-y-5">
 
-        {/* ── STATS ROW ── */}
+        {/* Stats */}
         <div className="grid grid-cols-3 gap-3">
           {[
-            { label: 'Active',    count: activeCount,    color: 'text-emerald-400' },
-            { label: 'Planning',  count: planningCount,  color: 'text-yellow-400'  },
-            { label: 'Done',      count: completedCount, color: 'text-blue-400'    },
+            { label: 'Active',   count: activeCount,    color: 'text-emerald-400', glow: 'shadow-[0_0_20px_rgba(16,185,129,0.15)]' },
+            { label: 'Planning', count: planningCount,  color: 'text-yellow-400',  glow: '' },
+            { label: 'Done',     count: completedCount, color: 'text-blue-400',    glow: '' },
           ].map(s => (
-            <div key={s.label} className="bg-[#131416] border border-white/8 rounded-xl p-3 text-center">
+            <div key={s.label} className={`bg-[#131416]/80 border border-white/8 rounded-xl p-3 text-center backdrop-blur-md ${s.glow}`}>
               <p className={`text-2xl font-black ${s.color}`}>{s.count}</p>
               <p className="text-[9px] uppercase text-gray-500 font-mono mt-0.5">{s.label}</p>
             </div>
           ))}
         </div>
 
-        {/* ── FILTER + NEW ── */}
+        {/* Filter + New */}
         <div className="flex items-center justify-between">
           <div className="flex gap-1.5">
             {['all', 'active', 'planning', 'completed'].map(s => (
@@ -137,19 +204,19 @@ const DashboardView = () => {
           </div>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold cursor-pointer active:scale-95 transition-all"
+            className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-500 hover:bg-blue-400 text-white rounded-xl text-xs font-bold cursor-pointer active:scale-95 transition-all shadow-[0_0_15px_rgba(59,130,246,0.3)]"
           >
             <Plus size={13} /> New Trip
           </button>
         </div>
 
-        {/* ── TRIPS LIST ── */}
+        {/* Trips list */}
         {loading ? (
           <div className="flex justify-center py-20">
             <div className="h-8 w-8 animate-spin rounded-full border-2 border-blue-500 border-t-transparent" />
           </div>
         ) : filteredTrips.length === 0 ? (
-          <div className="text-center py-16 border border-white/5 rounded-2xl bg-white/2">
+          <div className="text-center py-16 border border-white/5 rounded-2xl bg-black/20 backdrop-blur-sm">
             <Activity className="w-10 h-10 mx-auto mb-3 text-gray-700" />
             <p className="text-sm text-gray-500">No trips here yet.</p>
             <p className="text-xs text-gray-700 mt-1">Tap "New Trip" to plan your convoy.</p>
@@ -159,13 +226,13 @@ const DashboardView = () => {
             {filteredTrips.map((trip, idx) => (
               <motion.div
                 key={trip._id}
-                initial={{ opacity: 0, y: 12 }}
+                initial={{ opacity: 0, y: 15 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: idx * 0.04 }}
+                transition={{ delay: idx * 0.05 }}
                 onClick={() => navigate(`/trips/${trip._id}`)}
-                className="bg-[#131416] border border-white/8 hover:border-white/15 rounded-2xl p-4 cursor-pointer group transition-all relative overflow-hidden"
+                className="bg-[#131416]/80 border border-white/8 hover:border-blue-500/30 rounded-2xl p-4 cursor-pointer group transition-all relative overflow-hidden backdrop-blur-md hover:shadow-[0_0_20px_rgba(59,130,246,0.08)]"
               >
-                <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-blue-500/20 to-transparent" />
+                <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-blue-500/30 to-transparent" />
 
                 <div className="flex justify-between items-start mb-3">
                   <div className="flex-1 min-w-0">
@@ -174,8 +241,8 @@ const DashboardView = () => {
                       <p className="text-[10px] text-gray-500 mt-0.5 line-clamp-1">{trip.description}</p>
                     )}
                   </div>
-                  <span className={`ml-3 shrink-0 px-2 py-0.5 rounded-full text-[9px] font-bold border capitalize ${STATUS_COLOR[trip.status] || STATUS_COLOR.planning}`}>
-                    {trip.status === 'active' && <span className="inline-block w-1.5 h-1.5 bg-emerald-400 rounded-full mr-1 animate-pulse" />}
+                  <span className={`ml-3 shrink-0 px-2 py-0.5 rounded-full text-[9px] font-bold border capitalize flex items-center gap-1 ${STATUS_COLOR[trip.status] || STATUS_COLOR.planning}`}>
+                    {trip.status === 'active' && <span className="w-1.5 h-1.5 bg-emerald-400 rounded-full animate-pulse" />}
                     {trip.status}
                   </span>
                 </div>
@@ -196,7 +263,7 @@ const DashboardView = () => {
                       <Users size={10} className="text-purple-400" />
                       {trip.members?.length || 1}
                     </span>
-                    <ArrowRight size={12} className="text-gray-600 group-hover:text-white group-hover:translate-x-0.5 transition-all" />
+                    <ArrowRight size={12} className="text-gray-600 group-hover:text-blue-400 group-hover:translate-x-0.5 transition-all" />
                   </div>
                 </div>
               </motion.div>
@@ -205,18 +272,19 @@ const DashboardView = () => {
         )}
       </div>
 
-      {/* ── CREATE TRIP MODAL ── */}
+      {/* Create Trip Modal */}
       <AnimatePresence>
         {showCreateModal && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center px-4 pb-8 bg-black/60 backdrop-blur-md" onClick={() => setShowCreateModal(false)}>
+          <div className="fixed inset-0 z-50 flex items-end justify-center px-4 pb-8 bg-black/70 backdrop-blur-md" onClick={() => setShowCreateModal(false)}>
             <motion.div
               initial={{ y: 100, opacity: 0 }}
               animate={{ y: 0, opacity: 1 }}
               exit={{ y: 100, opacity: 0 }}
               transition={{ type: 'spring', stiffness: 400, damping: 35 }}
-              className="bg-[#131416] border border-white/10 rounded-3xl p-6 w-full max-w-md"
+              className="bg-[#131416] border border-white/10 rounded-3xl p-6 w-full max-w-md shadow-[0_0_60px_rgba(0,0,0,0.8)]"
               onClick={e => e.stopPropagation()}
             >
+              <div className="w-10 h-1 bg-white/20 rounded-full mx-auto mb-5" />
               <h2 className="text-base font-bold text-white mb-1">New Trip</h2>
               <p className="text-[10px] text-gray-500 mb-4">Plan a new convoy run with your crew.</p>
 
