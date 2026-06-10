@@ -35,7 +35,10 @@ app.use(cors({
                       origin.startsWith('http://localhost') ||
                       origin.startsWith('https://localhost') ||
                       origin.includes('10.0.2.2') ||
-                      origin.includes('192.168.');
+                      origin.includes('10.17.207.109') ||
+                      origin.includes('192.168.') ||
+                      origin.startsWith('http://10.') ||
+                      origin.startsWith('https://10.');
 
     if (isAllowed) {
       return callback(null, true);
@@ -46,6 +49,7 @@ app.use(cors({
   },
   credentials: true
 }));
+
 
 app.use(express.json()); // Allows us to read JSON data from the frontend
 
@@ -82,7 +86,10 @@ const io = new Server(server, {
                         origin.startsWith('http://localhost') ||
                         origin.startsWith('https://localhost') ||
                         origin.includes('10.0.2.2') ||
-                        origin.includes('192.168.');
+                        origin.includes('10.17.207.109') ||
+                        origin.includes('192.168.') ||
+                        origin.startsWith('http://10.') ||
+                        origin.startsWith('https://10.');
       if (isAllowed) {
         return callback(null, true);
       } else {

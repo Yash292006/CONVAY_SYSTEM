@@ -18,8 +18,10 @@ import BottomNav from './components/BottomNav';
 const getBaseURL = () => {
   let url = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
   if (Capacitor.isNativePlatform()) {
+    // If it's a native platform, we need to point to the computer's local IP
+    // 10.17.207.109 is your current local IP for physical devices
     if (url.includes('localhost') || url.includes('127.0.0.1')) {
-      url = url.replace('localhost', '10.0.2.2').replace('127.0.0.1', '10.0.2.2');
+      url = url.replace('localhost', '10.17.207.109').replace('127.0.0.1', '10.17.207.109');
     }
   }
   return url;
