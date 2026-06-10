@@ -1,0 +1,114 @@
+@import "tailwindcss";
+
+/* ── Tailwind CSS v4 Theme Variables ────────────────────────────────────── */
+@theme {
+  --color-primary: #adc6ff;
+  --color-on-primary: #002e6a;
+  --color-surface-dim: #131315;
+  --color-tertiary: #c8c6c9;
+  --color-primary-fixed-dim: #adc6ff;
+  --color-surface-container-low: #1c1b1d;
+  --color-primary-fixed: #d8e2ff;
+  --color-on-tertiary-container: #29292c;
+  --color-surface: #131315;
+  --color-on-secondary-fixed: #1b1b1e;
+  --color-surface-container-lowest: #0e0e10;
+  --color-inverse-on-surface: #313032;
+  --color-tertiary-fixed-dim: #c8c6c9;
+  --color-on-tertiary-fixed: #1b1b1e;
+  --color-outline: #8c909f;
+  --color-inverse-surface: #e5e1e4;
+  --color-on-primary-container: #00285d;
+  --color-tertiary-container: #919094;
+  --color-surface-variant: #353437;
+  --color-surface-container-high: #2a2a2c;
+  --color-secondary: #c8c5ca;
+  --color-secondary-container: #47464a;
+  --color-on-secondary: #303033;
+  --color-tertiary-fixed: #e4e1e5;
+  --color-outline-variant: #424754;
+  --color-on-primary-fixed-variant: #004395;
+  --color-background: #131315;
+  --color-on-tertiary: #303033;
+  --color-primary-container: #4d8eff;
+  --color-on-error: #690005;
+  --color-error: #ffb4ab;
+  --color-on-surface-variant: #c2c6d6;
+  --color-on-secondary-container: #b6b4b8;
+  --color-surface-bright: #39393b;
+  --color-on-secondary-fixed-variant: #47464a;
+  --color-on-tertiary-fixed-variant: #47464a;
+  --color-on-background: #e5e1e4;
+  --color-secondary-fixed: #e4e1e6;
+  --color-on-primary-fixed: #001a42;
+  --color-surface-container-highest: #353437;
+  --color-on-surface: #e5e1e4;
+  --color-surface-tint: #adc6ff;
+  --color-on-error-container: #ffdad6;
+  --color-surface-container: #201f22;
+  --color-secondary-fixed-dim: #c8c5ca;
+  --color-inverse-primary: #005ac2;
+  --color-error-container: #93000a;
+
+  --font-headline-lg-mobile: "Space Grotesk", sans-serif;
+  --font-headline-lg: "Space Grotesk", sans-serif;
+  --font-title-md: "Inter", sans-serif;
+  --font-label-caps: "Space Mono", monospace;
+  --font-stats-lg: "Space Grotesk", sans-serif;
+  --font-body-md: "Inter", sans-serif;
+  --font-display-lg: "Space Grotesk", sans-serif;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  background-color: #09090b;
+  color: #e5e1e4;
+  font-family: var(--font-body-md);
+  overflow-x: hidden;
+}
+
+/* Custom Webkit scrollbar hiding */
+::-webkit-scrollbar {
+  display: none;
+}
+
+/* Floating animation for the login card */
+@keyframes float {
+  0% { transform: translateY(0px); }
+  50% { transform: translateY(-10px); }
+  100% { transform: translateY(0px); }
+}
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Neon pulsing shadow for CTA */
+@keyframes pulse-neon {
+  0% { box-shadow: 0 0 10px rgba(77, 142, 255, 0.2), 0 0 20px rgba(77, 142, 255, 0.1); }
+  50% { box-shadow: 0 0 20px rgba(77, 142, 255, 0.5), 0 0 40px rgba(77, 142, 255, 0.2); }
+  100% { box-shadow: 0 0 10px rgba(77, 142, 255, 0.2), 0 0 20px rgba(77, 142, 255, 0.1); }
+}
+.btn-neon {
+  animation: pulse-neon 3s infinite alternate;
+}
+
+/* Glassmorphism Classes */
+.glass-panel {
+  background: rgba(28, 27, 29, 0.7);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(173, 198, 255, 0.15);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.8);
+}
+
+.glass-input {
+  background: rgba(14, 14, 16, 0.8);
+  border: 1px solid rgba(66, 71, 84, 0.8);
+  transition: all 0.3s;
+}
+
+.glass-input:focus {
+  border-color: #adc6ff;
+  box-shadow: 0 0 15px rgba(77, 142, 255, 0.3);
+}
