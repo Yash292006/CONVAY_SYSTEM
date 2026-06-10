@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Map, { Marker } from 'react-map-gl/mapbox';
+import Map, { Marker, Source, Layer } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { io } from 'socket.io-client';
 import { Navigation, Search, Crosshair, Layers, Compass, ArrowLeft } from 'lucide-react';
@@ -14,6 +14,9 @@ const STYLES = [
   { name: 'Standard Streets', url: 'mapbox://styles/mapbox/streets-v12' }
 ];
 
+// Destination: Gokarna Beach
+const DESTINATION = { lat: 14.5479, lng: 74.3122, name: 'Gokarna Beach' };
+
 const MapView = () => {
   const navigate = useNavigate();
   const [riders, setRiders] = useState([]);
@@ -22,8 +25,12 @@ const MapView = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRider, setSelectedRider] = useState(null);
   const [mapStyle, setMapStyle] = useState('mapbox://styles/mapbox/dark-v11');
-  const [incomingPing, setIncomingPing] = useState(null); // { fromName, message }
+  const [incomingPing, setIncomingPing] = useState(null);
   const [pingSent, setPingSent] = useState(false);
+  const [routeData, setRouteData] = useState(null);   // GeoJSON LineString for the route
+  const [eta, setEta] = useState(null);               // Formatted ETA string
+  const [distanceKm, setDistanceKm] = useState(null); // Distance in km
+  const [arrivalTime, setArrivalTime] = useState(null); // Arrival clock time
   
   const socketRef = useRef(null);
   const mapRef = useRef(null);
@@ -81,6 +88,9 @@ const MapView = () => {
             hasCenteredRef.current = true;
           }
 
+          // Fetch/refresh route to destination
+          maybeRefetchRoute(latitude, longitude);
+
           const activeUser = JSON.parse(localStorage.getItem('convoyUser'));
           if (activeUser) {
             socketRef.current.emit('updateLocation', {
@@ -99,6 +109,53 @@ const MapView = () => {
       return () => navigator.geolocation.clearWatch(watchId);
     }
   }, []);
+
+  // Fetch live route from Mapbox Directions API
+  const fetchRoute = async (userLat, userLng) => {
+    if (!MAPBOX_TOKEN) return;
+    try {
+      const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${userLng},${userLat};${DESTINATION.lng},${DESTINATION.lat}?geometries=geojson&overview=full&access_token=${MAPBOX_TOKEN}`;
+      const res = await fetch(url);
+      const json = await res.json();
+      if (!json.routes || json.routes.length === 0) return;
+
+      const route = json.routes[0];
+      const durationSecs = route.duration; // seconds
+      const distMeters = route.distance;   // meters
+
+      // Build GeoJSON for the route line
+      setRouteData({
+        type: 'Feature',
+        geometry: route.geometry
+      });
+
+      // Format distance
+      const km = (distMeters / 1000).toFixed(1);
+      setDistanceKm(km);
+
+      // Format ETA duration (e.g. "2h 15m" or "45m")
+      const totalMins = Math.round(durationSecs / 60);
+      const hrs = Math.floor(totalMins / 60);
+      const mins = totalMins % 60;
+      setEta(hrs > 0 ? `${hrs}h ${mins}m` : `${mins}m`);
+
+      // Format arrival clock time
+      const arrival = new Date(Date.now() + durationSecs * 1000);
+      setArrivalTime(arrival.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' }));
+    } catch (err) {
+      console.error('Route fetch failed:', err);
+    }
+  };
+
+  // Fetch route when user location is first acquired, then every 2 mins
+  const lastRouteFetchRef = useRef(0);
+  const maybeRefetchRoute = (lat, lng) => {
+    const now = Date.now();
+    if (now - lastRouteFetchRef.current > 120_000) {
+      lastRouteFetchRef.current = now;
+      fetchRoute(lat, lng);
+    }
+  };
 
   // Recenter map on user's current GPS location
   const recenterOnUser = () => {
@@ -145,6 +202,48 @@ const MapView = () => {
         mapStyle={mapStyle} 
         mapboxAccessToken={MAPBOX_TOKEN}
       >
+        {/* Route line from user to destination */}
+        {routeData && (
+          <Source id="route" type="geojson" data={routeData}>
+            {/* Glowing outer line */}
+            <Layer
+              id="route-glow"
+              type="line"
+              paint={{
+                'line-color': '#3b82f6',
+                'line-width': 10,
+                'line-opacity': 0.2,
+                'line-blur': 4
+              }}
+              layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+            />
+            {/* Solid inner line */}
+            <Layer
+              id="route-line"
+              type="line"
+              paint={{
+                'line-color': '#60a5fa',
+                'line-width': 4,
+                'line-opacity': 0.95,
+                'line-dasharray': [1, 0]
+              }}
+              layout={{ 'line-join': 'round', 'line-cap': 'round' }}
+            />
+          </Source>
+        )}
+
+        {/* Destination pin marker */}
+        <Marker longitude={DESTINATION.lng} latitude={DESTINATION.lat} anchor="bottom">
+          <div className="flex flex-col items-center">
+            <div className="w-8 h-8 rounded-full bg-red-500/20 border-2 border-red-400 flex items-center justify-center shadow-[0_0_15px_rgba(239,68,68,0.6)] animate-pulse">
+              <span className="text-sm">📍</span>
+            </div>
+            <div className="mt-1 bg-[#1c1b1d]/90 backdrop-blur-md px-2 py-0.5 rounded-lg border border-red-500/20 text-[9px] font-bold text-red-300 whitespace-nowrap">
+              {DESTINATION.name}
+            </div>
+          </div>
+        </Marker>
+
         {/* User's own GPS marker */}
         {userLocation && (
           <Marker 
@@ -375,12 +474,21 @@ const MapView = () => {
                   <p className="text-3xl font-black text-white">{speed} <span className="text-sm font-bold text-[#3b82f6]">km/h</span></p>
                 </div>
 
-                <div className="text-right flex flex-col items-end">
-                  <span className="text-[10px] uppercase tracking-[0.2em] text-[#8c909f] mb-1">Target</span>
+                <div className="text-right flex flex-col items-end gap-1.5">
                   <div className="flex items-center gap-2 bg-[#3b82f6]/10 px-3 py-1.5 rounded-lg border border-[#3b82f6]/20">
-                    <Navigation size={14} className="text-[#3b82f6] transform rotate-45 animate-pulse" />
-                    <span className="text-sm font-bold text-white">Gokarna Beach</span>
+                    <Navigation size={13} className="text-[#3b82f6] transform rotate-45 animate-pulse shrink-0" />
+                    <span className="text-xs font-bold text-white">{DESTINATION.name}</span>
                   </div>
+                  {eta ? (
+                    <div className="text-right">
+                      <p className="text-[18px] font-black text-[#3b82f6] leading-none">{eta}</p>
+                      <p className="text-[9px] text-gray-400 font-mono mt-0.5">
+                        {distanceKm} km · Arrive {arrivalTime}
+                      </p>
+                    </div>
+                  ) : (
+                    <p className="text-[9px] text-gray-500 font-mono animate-pulse">Calculating route...</p>
+                  )}
                 </div>
               </motion.div>
             )}
