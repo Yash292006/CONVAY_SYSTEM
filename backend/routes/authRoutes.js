@@ -170,4 +170,79 @@ router.get('/crew', protect, async (req, res) => {
   }
 });
 
+// @desc    Forgot password (simulated OTP)
+// @route   POST /api/auth/forgot-password
+// @access  Public
+router.post('/forgot-password', async (req, res) => {
+  const { email } = req.body;
+  try {
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: 'No user registered with this callsign / email' });
+    }
+    // Simulate sending OTP 123456
+    res.status(200).json({ 
+      message: 'Reset instructions dispatched to commlink', 
+      otp: '123456' 
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Password recovery failed', error: error.message });
+  }
+});
+
+// @desc    Reset password using OTP
+// @route   POST /api/auth/reset-password
+// @access  Public
+router.post('/reset-password', async (req, res) => {
+  const { email, otp, newPassword } = req.body;
+  try {
+    if (otp !== '123456') {
+      return res.status(400).json({ message: 'Invalid override code / OTP' });
+    }
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ message: 'No user registered with this callsign / email' });
+    }
+    user.password = newPassword;
+    await user.save();
+    res.status(200).json({ message: 'Access code reset successful' });
+  } catch (error) {
+    res.status(500).json({ message: 'Reset failed', error: error.message });
+  }
+});
+
+// @desc    Google Sign In Simulation
+// @route   POST /api/auth/google-login
+// @access  Public
+router.post('/google-login', async (req, res) => {
+  const { email, name } = req.body;
+  try {
+    let user = await User.findOne({ email });
+    if (!user) {
+      // Create user if they don't exist
+      user = await User.create({
+        name,
+        email,
+        password: Math.random().toString(36).slice(-8), // random secure password
+        bikeModel: 'Google Cruiser'
+      });
+    }
+    res.status(200).json({
+      message: 'Google login successful',
+      token: generateToken(user._id),
+      _id: user._id,
+      name: user.name,
+      email: user.email,
+      bikeModel: user.bikeModel,
+      user: {
+        id: user._id,
+        name: user.name,
+        bikeModel: user.bikeModel
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ message: 'Google authentication failed', error: error.message });
+  }
+});
+
 export default router;

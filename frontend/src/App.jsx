@@ -139,6 +139,30 @@ export const AuthProvider = ({ children }) => {
     }
   };
 
+  const loginWithGoogle = async (email, name) => {
+    try {
+      const res = await axios.post('/auth/google-login', { email, name });
+      setToken(res.data.token);
+      setUser({ 
+        _id: res.data._id, 
+        name: res.data.name, 
+        email: res.data.email, 
+        bikeModel: res.data.bikeModel 
+      });
+      localStorage.setItem('convoyUser', JSON.stringify({ 
+        id: res.data._id, 
+        name: res.data.name, 
+        bikeModel: res.data.bikeModel 
+      }));
+      return { success: true };
+    } catch (err) {
+      return {
+        success: false,
+        message: err.response?.data?.message || 'Google login failed. Please try again.'
+      };
+    }
+  };
+
   const logout = () => {
     setToken('');
     setUser(null);
@@ -154,7 +178,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ user, token, loading, login, register, logout, refreshUser }}>
+    <AuthContext.Provider value={{ user, token, loading, login, register, logout, refreshUser, loginWithGoogle }}>
       {children}
     </AuthContext.Provider>
   );

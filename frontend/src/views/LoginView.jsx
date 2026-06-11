@@ -3,21 +3,33 @@ import * as THREE from 'three';
 import { motion, AnimatePresence } from 'framer-motion';
 import { AuthContext } from '../App';
 import { useNavigate } from 'react-router-dom';
-import { Mail, Key, User, Shield, ArrowRight, HelpCircle } from 'lucide-react';
+import { Mail, Key, User, Shield, ArrowRight, HelpCircle, Chrome, Github } from 'lucide-react';
+import axios from 'axios';
 
 const LoginView = () => {
-  const [activeTab, setActiveTab] = useState('signin'); // 'signin' or 'join'
+  const [activeTab, setActiveTab] = useState('signin'); // 'signin', 'join', 'forgot', or 'reset'
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [moto, setMoto] = useState('');
+  
+  // Reset States
+  const [otp, setOtp] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
+  
+  // Google Simulation States
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [googleCustomEmail, setGoogleCustomEmail] = useState('');
+  const [googleCustomName, setGoogleCustomName] = useState('');
+
   const [error, setError] = useState('');
   const [loadingForm, setLoadingForm] = useState(false);
 
   const shaderCanvasRef = useRef(null);
   const threeContainerRef = useRef(null);
   
-  const { login, register, token } = useContext(AuthContext);
+  const { login, register, token, loginWithGoogle } = useContext(AuthContext);
   const navigate = useNavigate();
 
   // Redirect if already logged in
@@ -328,6 +340,66 @@ const LoginView = () => {
     }
   };
 
+  const handleForgotPassword = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!email) {
+      setError('Please enter your CALLSIGN / EMAIL to verify identity.');
+      return;
+    }
+    setLoadingForm(true);
+    try {
+      const res = await axios.post('/api/auth/forgot-password', { email });
+      setLoadingForm(false);
+      setOtpSent(true);
+      setActiveTab('reset');
+      alert(`Override instructions dispatched! Use override code: ${res.data.otp}`);
+    } catch (err) {
+      setLoadingForm(false);
+      setError(err.response?.data?.message || 'Password recovery failed. Check connection.');
+    }
+  };
+
+  const handleResetPassword = async (e) => {
+    e.preventDefault();
+    setError('');
+    if (!otp || !newPassword) {
+      setError('Both override OTP code and new access code are required.');
+      return;
+    }
+    setLoadingForm(true);
+    try {
+      await axios.post('/api/auth/reset-password', { email, otp, newPassword });
+      setLoadingForm(false);
+      alert('Override code authorized! Access code updated successfully.');
+      setActiveTab('signin');
+      setOtpSent(false);
+      setOtp('');
+      setNewPassword('');
+    } catch (err) {
+      setLoadingForm(false);
+      setError(err.response?.data?.message || 'Code override authorization failed.');
+    }
+  };
+
+  const handleGoogleLoginSubmit = async (customEmail, customName) => {
+    setError('');
+    setLoadingForm(true);
+    setShowGoogleModal(false);
+    try {
+      const res = await loginWithGoogle(customEmail, customName);
+      setLoadingForm(false);
+      if (res.success) {
+        navigate('/');
+      } else {
+        setError(res.message);
+      }
+    } catch (err) {
+      setLoadingForm(false);
+      setError('Google authenticating gateway timed out.');
+    }
+  };
+
   return (
     <div className="relative min-h-screen w-full overflow-hidden bg-background font-body-md text-on-background selection:bg-primary selection:text-on-primary antialiased flex flex-col items-center justify-center p-6">
       
@@ -346,42 +418,47 @@ const LoginView = () => {
       <div className="animate-float relative z-20 w-full max-w-md overflow-hidden rounded-xl border border-surface-variant/50 bg-surface-container-low/80 backdrop-blur-xl shadow-[0_8px_32px_rgba(0,0,0,0.8)] before:absolute before:inset-0 before:z-[-1] before:rounded-xl before:border before:border-primary/20 before:shadow-[inset_0_0_20px_rgba(77,142,255,0.05)]">
         
         {/* Sign In & Register Tabs */}
-        <div className="flex border-b border-surface-variant/50">
-          <button 
-            className={`w-1/2 py-4 text-center font-label-caps text-label-caps transition-all focus:outline-none cursor-pointer ${
-              activeTab === 'signin' 
-                ? 'text-primary border-b-2 border-primary bg-primary/5' 
-                : 'text-on-surface-variant hover:text-on-surface'
-            }`} 
-            onClick={() => {
-              setActiveTab('signin');
-              setError('');
-            }}
-          >
-            SIGN IN
-          </button>
-          
-          <button 
-            className={`w-1/2 py-4 text-center font-label-caps text-label-caps transition-all focus:outline-none cursor-pointer ${
-              activeTab === 'join' 
-                ? 'text-primary border-b-2 border-primary bg-primary/5' 
-                : 'text-on-surface-variant hover:text-on-surface'
-            }`} 
-            onClick={() => {
-              setActiveTab('join');
-              setError('');
-            }}
-          >
-            JOIN CREW
-          </button>
-        </div>
+        {(activeTab === 'signin' || activeTab === 'join') && (
+          <div className="flex border-b border-surface-variant/50">
+            <button 
+              className={`w-1/2 py-4 text-center font-label-caps text-label-caps transition-all focus:outline-none cursor-pointer ${
+                activeTab === 'signin' 
+                  ? 'text-primary border-b-2 border-primary bg-primary/5' 
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`} 
+              onClick={() => {
+                setActiveTab('signin');
+                setError('');
+              }}
+            >
+              SIGN IN
+            </button>
+            
+            <button 
+              className={`w-1/2 py-4 text-center font-label-caps text-label-caps transition-all focus:outline-none cursor-pointer ${
+                activeTab === 'join' 
+                  ? 'text-primary border-b-2 border-primary bg-primary/5' 
+                  : 'text-on-surface-variant hover:text-on-surface'
+              }`} 
+              onClick={() => {
+                setActiveTab('join');
+                setError('');
+              }}
+            >
+              JOIN CREW
+            </button>
+          </div>
+        )}
 
         {/* Card Forms Content */}
         <div className="p-6 sm:p-8">
           <div className="mb-6 text-center">
             <h1 className="font-display-lg text-display-lg text-on-surface uppercase tracking-tighter mb-1">THE CONVOY</h1>
             <p className="font-label-caps text-label-caps text-on-surface-variant opacity-70">
-              {activeTab === 'signin' ? 'SECURE COMMLINK ACCESS' : 'CREW REGISTRATION PIPELINE'}
+              {activeTab === 'signin' && 'SECURE COMMLINK ACCESS'}
+              {activeTab === 'join' && 'CREW REGISTRATION PIPELINE'}
+              {activeTab === 'forgot' && 'SECURITY CREDENTIAL OVERRIDE'}
+              {activeTab === 'reset' && 'COMM OVERRIDE ACCESS CODES'}
             </p>
           </div>
 
@@ -391,116 +468,371 @@ const LoginView = () => {
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            
-            {/* Conditional Registration Fields */}
-            {activeTab === 'join' && (
-              <>
-                <div className="space-y-1">
-                  <label htmlFor="rider-name" className="block font-label-caps text-label-caps text-on-surface-variant">RIDER ALIAS</label>
-                  <div className="relative">
-                    <User className="absolute left-3 top-3.5 h-4 w-4 text-on-surface-variant/50" />
-                    <input 
-                      type="text" 
-                      id="rider-name"
-                      name="name"
-                      autocomplete="username"
-                      value={name}
-                      onChange={(e) => setName(e.target.value)}
-                      placeholder="VALKYRIE_99"
-                      className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-3 pl-10 pr-4 text-on-surface font-label-caps text-label-caps outline-none focus:border-primary focus:ring-1 focus:ring-primary focus:shadow-[0_0_15px_rgba(77,142,255,0.3)] transition-all"
-                    />
-                  </div>
-                </div>
-
-                <div className="space-y-1">
-                  <label htmlFor="primary-machine" className="block font-label-caps text-label-caps text-on-surface-variant">PRIMARY MACHINE</label>
-                  <div className="relative">
-                    <span className="absolute left-3 top-3.5 text-xs text-on-surface-variant/50">🏍️</span>
-                    <input 
-                      type="text" 
-                      id="primary-machine"
-                      name="moto"
-                      value={moto}
-                      onChange={(e) => setMoto(e.target.value)}
-                      placeholder="V4-S PANIGALE"
-                      className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-3 pl-10 pr-4 text-on-surface font-label-caps text-label-caps outline-none focus:border-primary focus:ring-1 focus:ring-primary focus:shadow-[0_0_15px_rgba(77,142,255,0.3)] transition-all"
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* Email Field */}
-            <div className="space-y-1">
-              <label htmlFor="rider-email" className="block font-label-caps text-label-caps text-on-surface-variant">
-                {activeTab === 'signin' ? 'CALLSIGN / EMAIL' : 'COMMLINK (EMAIL)'}
-              </label>
-              <div className="relative">
-                <Mail className="absolute left-3 top-3.5 h-4 w-4 text-on-surface-variant/50" />
-                <input 
-                  type="email" 
-                  id="rider-email"
-                  name="email"
-                  autocomplete="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  placeholder={activeTab === 'signin' ? 'GHOST_RIDER_01' : 'RIDER@CONVOY.NET'}
-                  className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-3 pl-10 pr-4 text-on-surface font-label-caps text-label-caps outline-none focus:border-primary focus:ring-1 focus:ring-primary focus:shadow-[0_0_15px_rgba(77,142,255,0.3)] transition-all"
-                />
-              </div>
-            </div>
-
-            {/* Password Field */}
-            <div className="space-y-1">
-              <div className="flex justify-between items-center">
-                <label htmlFor="rider-password" className="block font-label-caps text-label-caps text-on-surface-variant">
-                  {activeTab === 'signin' ? 'ACCESS CODE' : 'CREW ACCESS CODE'}
-                </label>
-                {activeTab === 'signin' && (
-                  <button 
-                    type="button" 
-                    onClick={() => alert('Secure commlinks require manual override. Contact coordinator.')} 
-                    className="font-label-caps text-[10px] text-primary hover:text-primary-fixed transition-colors"
-                  >
-                    FORGOT?
-                  </button>
-                )}
-              </div>
-              <div className="relative">
-                <Key className="absolute left-3 top-3.5 h-4 w-4 text-on-surface-variant/50" />
-                <input 
-                  type="password" 
-                  id="rider-password"
-                  name="password"
-                  autocomplete={activeTab === 'signin' ? 'current-password' : 'new-password'}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="••••••••"
-                  className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-3 pl-10 pr-4 text-on-surface font-label-caps text-label-caps outline-none focus:border-primary focus:ring-1 focus:ring-primary focus:shadow-[0_0_15px_rgba(77,142,255,0.3)] transition-all"
-                />
-              </div>
-            </div>
-
-            {/* CTA Button */}
-            <button 
-              type="submit" 
-              disabled={loadingForm}
-              className="btn-neon mt-4 w-full rounded-lg bg-primary/20 border border-primary py-3.5 font-headline-lg-mobile text-title-md text-primary hover:bg-primary hover:text-on-primary transition-all duration-300 group flex items-center justify-center gap-2 cursor-pointer"
-            >
-              {loadingForm ? (
-                <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
-              ) : (
+          {/* A. SIGN IN / JOIN CREW FORMS */}
+          {(activeTab === 'signin' || activeTab === 'join') && (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              
+              {/* Conditional Registration Fields */}
+              {activeTab === 'join' && (
                 <>
-                  <span>{activeTab === 'signin' ? 'ENTER THE CONVOY' : 'INITIALIZE REGISTRATION'}</span>
-                  <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  <div className="space-y-1">
+                    <label htmlFor="rider-name" className="block font-label-caps text-label-caps text-on-surface-variant">RIDER ALIAS</label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-3.5 h-4 w-4 text-on-surface-variant/50" />
+                      <input 
+                        type="text" 
+                        id="rider-name"
+                        name="name"
+                        autocomplete="username"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        placeholder="VALKYRIE_99"
+                        className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-3 pl-10 pr-4 text-on-surface font-label-caps text-label-caps outline-none focus:border-primary focus:ring-1 focus:ring-primary focus:shadow-[0_0_15px_rgba(77,142,255,0.3)] transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="space-y-1">
+                    <label htmlFor="primary-machine" className="block font-label-caps text-label-caps text-on-surface-variant">PRIMARY MACHINE</label>
+                    <div className="relative">
+                      <span className="absolute left-3 top-3.5 text-xs text-on-surface-variant/50">🏍️</span>
+                      <input 
+                        type="text" 
+                        id="primary-machine"
+                        name="moto"
+                        value={moto}
+                        onChange={(e) => setMoto(e.target.value)}
+                        placeholder="V4-S PANIGALE"
+                        className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-3 pl-10 pr-4 text-on-surface font-label-caps text-label-caps outline-none focus:border-primary focus:ring-1 focus:ring-primary focus:shadow-[0_0_15px_rgba(77,142,255,0.3)] transition-all"
+                      />
+                    </div>
+                  </div>
                 </>
               )}
-            </button>
-          </form>
+
+              {/* Email Field */}
+              <div className="space-y-1">
+                <label htmlFor="rider-email" className="block font-label-caps text-label-caps text-on-surface-variant">
+                  {activeTab === 'signin' ? 'CALLSIGN / EMAIL' : 'COMMLINK (EMAIL)'}
+                </label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-3.5 h-4 w-4 text-on-surface-variant/50" />
+                  <input 
+                    type="email" 
+                    id="rider-email"
+                    name="email"
+                    autocomplete="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder={activeTab === 'signin' ? 'GHOST_RIDER_01' : 'RIDER@CONVOY.NET'}
+                    className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-3 pl-10 pr-4 text-on-surface font-label-caps text-label-caps outline-none focus:border-primary focus:ring-1 focus:ring-primary focus:shadow-[0_0_15px_rgba(77,142,255,0.3)] transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* Password Field */}
+              <div className="space-y-1">
+                <div className="flex justify-between items-center">
+                  <label htmlFor="rider-password" className="block font-label-caps text-label-caps text-on-surface-variant">
+                    {activeTab === 'signin' ? 'ACCESS CODE' : 'CREW ACCESS CODE'}
+                  </label>
+                  {activeTab === 'signin' && (
+                    <button 
+                      type="button" 
+                      onClick={() => setActiveTab('forgot')}
+                      className="font-label-caps text-[10px] text-primary hover:text-primary-fixed transition-colors cursor-pointer"
+                    >
+                      FORGOT?
+                    </button>
+                  )}
+                </div>
+                <div className="relative">
+                  <Key className="absolute left-3 top-3.5 h-4 w-4 text-on-surface-variant/50" />
+                  <input 
+                    type="password" 
+                    id="rider-password"
+                    name="password"
+                    autocomplete={activeTab === 'signin' ? 'current-password' : 'new-password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-3 pl-10 pr-4 text-on-surface font-label-caps text-label-caps outline-none focus:border-primary focus:ring-1 focus:ring-primary focus:shadow-[0_0_15px_rgba(77,142,255,0.3)] transition-all"
+                  />
+                </div>
+              </div>
+
+              {/* CTA Button */}
+              <button 
+                type="submit" 
+                disabled={loadingForm}
+                className="btn-neon mt-4 w-full rounded-lg bg-primary/20 border border-primary py-3.5 font-headline-lg-mobile text-title-md text-primary hover:bg-primary hover:text-on-primary transition-all duration-300 group flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {loadingForm ? (
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                ) : (
+                  <>
+                    <span>{activeTab === 'signin' ? 'ENTER THE CONVOY' : 'INITIALIZE REGISTRATION'}</span>
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </>
+                )}
+              </button>
+            </form>
+          )}
+
+          {/* B. FORGOT PASSWORD FORM */}
+          {activeTab === 'forgot' && (
+            <form onSubmit={handleForgotPassword} className="space-y-4">
+              <p className="text-xs text-gray-400 font-mono leading-relaxed">
+                Provide your registered Call Sign / Email commlink. We will dispatch a simulated bypass code override sequence.
+              </p>
+              
+              <div className="space-y-1">
+                <label htmlFor="recovery-email" className="block font-label-caps text-label-caps text-on-surface-variant">REGISTERED EMAIL</label>
+                <div className="relative">
+                  <Mail className="absolute left-3 top-3.5 h-4 w-4 text-on-surface-variant/50" />
+                  <input 
+                    type="email" 
+                    id="recovery-email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="RIDER@CONVOY.NET"
+                    className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-3 pl-10 pr-4 text-on-surface font-label-caps text-label-caps outline-none focus:border-primary focus:ring-1 focus:ring-primary focus:shadow-[0_0_15px_rgba(77,142,255,0.3)] transition-all"
+                  />
+                </div>
+              </div>
+
+              <button 
+                type="submit" 
+                disabled={loadingForm}
+                className="btn-neon mt-4 w-full rounded-lg bg-primary/20 border border-primary py-3.5 font-headline-lg-mobile text-title-md text-primary hover:bg-primary hover:text-on-primary transition-all duration-300 group flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {loadingForm ? (
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                ) : (
+                  <>
+                    <span>DISPATCH OVERRIDE CODE</span>
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setActiveTab('signin'); setError(''); }}
+                className="w-full text-center text-xs text-gray-500 hover:text-gray-300 font-mono mt-2 transition-colors cursor-pointer"
+              >
+                ← BACK TO SECURE COMMLINK SIGN IN
+              </button>
+            </form>
+          )}
+
+          {/* C. RESET PASSWORD FORM */}
+          {activeTab === 'reset' && (
+            <form onSubmit={handleResetPassword} className="space-y-4">
+              <p className="text-xs text-emerald-400 font-mono leading-relaxed">
+                ✓ Override sequence dispatched! Use code `123456` to authenticate the override.
+              </p>
+
+              <div className="space-y-1">
+                <label htmlFor="otp-code" className="block font-label-caps text-label-caps text-on-surface-variant">OVERRIDE CODE (OTP)</label>
+                <div className="relative">
+                  <Shield className="absolute left-3 top-3.5 h-4 w-4 text-on-surface-variant/50" />
+                  <input 
+                    type="text" 
+                    id="otp-code"
+                    value={otp}
+                    onChange={(e) => setOtp(e.target.value)}
+                    placeholder="123456"
+                    className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-3 pl-10 pr-4 text-on-surface font-label-caps text-label-caps outline-none focus:border-primary focus:ring-1 focus:ring-primary focus:shadow-[0_0_15px_rgba(77,142,255,0.3)] transition-all"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label htmlFor="new-password" className="block font-label-caps text-label-caps text-on-surface-variant">NEW ACCESS CODE</label>
+                <div className="relative">
+                  <Key className="absolute left-3 top-3.5 h-4 w-4 text-on-surface-variant/50" />
+                  <input 
+                    type="password" 
+                    id="new-password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="••••••••"
+                    className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest py-3 pl-10 pr-4 text-on-surface font-label-caps text-label-caps outline-none focus:border-primary focus:ring-1 focus:ring-primary focus:shadow-[0_0_15px_rgba(77,142,255,0.3)] transition-all"
+                  />
+                </div>
+              </div>
+
+              <button 
+                type="submit" 
+                disabled={loadingForm}
+                className="btn-neon mt-4 w-full rounded-lg bg-emerald-500/20 border border-emerald-500 py-3.5 font-headline-lg-mobile text-title-md text-emerald-400 hover:bg-emerald-500 hover:text-white transition-all duration-300 group flex items-center justify-center gap-2 cursor-pointer"
+              >
+                {loadingForm ? (
+                  <div className="h-5 w-5 animate-spin rounded-full border-2 border-current border-t-transparent"></div>
+                ) : (
+                  <>
+                    <span>ACTIVATE CODE OVERRIDE</span>
+                    <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform" />
+                  </>
+                )}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => { setActiveTab('signin'); setError(''); }}
+                className="w-full text-center text-xs text-gray-500 hover:text-gray-300 font-mono mt-2 transition-colors cursor-pointer"
+              >
+                ← CANCEL OVERRIDE & SIGN IN
+              </button>
+            </form>
+          )}
+
+          {/* D. SOCIAL SIGN IN BUTTONS */}
+          {(activeTab === 'signin' || activeTab === 'join') && (
+            <div className="mt-6 pt-6 border-t border-surface-variant/20 text-center">
+              <p className="font-label-caps text-[10px] text-on-surface-variant opacity-60 mb-4 uppercase tracking-widest font-mono">
+                OR SECURE TELEMETRY LINK
+              </p>
+              <div className="flex justify-center gap-3">
+                {/* Google Sign In */}
+                <button
+                  type="button"
+                  onClick={() => setShowGoogleModal(true)}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-xl text-xs font-bold text-white transition-all active:scale-95 cursor-pointer shadow-lg w-1/3"
+                  title="Authenticate via Google Gateway"
+                >
+                  <Chrome className="w-4 h-4 text-blue-400" />
+                  <span>Google</span>
+                </button>
+
+                {/* GitHub Sign In */}
+                <button
+                  type="button"
+                  onClick={() => handleGoogleLoginSubmit('github.crew@convoy.net', 'GitHub Rider')}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-xl text-xs font-bold text-white transition-all active:scale-95 cursor-pointer shadow-lg w-1/3"
+                  title="Authenticate via GitHub Gateway"
+                >
+                  <Github className="w-4 h-4 text-purple-400" />
+                  <span>GitHub</span>
+                </button>
+
+                {/* Apple Sign In */}
+                <button
+                  type="button"
+                  onClick={() => handleGoogleLoginSubmit('apple.crew@convoy.net', 'Apple Rider')}
+                  className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-xl text-xs font-bold text-white transition-all active:scale-95 cursor-pointer shadow-lg w-1/3"
+                  title="Authenticate via Apple Keyring"
+                >
+                  <span className="text-sm font-black leading-none text-gray-300"></span>
+                  <span>Apple</span>
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
+      {/* ── GOOGLE ACCOUNT CHOOSER MODAL ── */}
+      <AnimatePresence>
+        {showGoogleModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4"
+          >
+            <motion.div
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.9, y: 20 }}
+              className="w-full max-w-sm bg-[#131315] border border-white/10 rounded-2xl shadow-2xl p-6 relative overflow-hidden"
+            >
+              {/* Dynamic top bar accent */}
+              <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-blue-500 via-red-500 to-yellow-500" />
+              
+              <div className="flex justify-between items-center mb-6">
+                <div className="flex items-center gap-2">
+                  <Chrome className="w-5 h-5 text-blue-400" />
+                  <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">Sign in with Google</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowGoogleModal(false)}
+                  className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-white cursor-pointer text-xs transition-colors"
+                >
+                  ✕
+                </button>
+              </div>
+
+              <p className="text-xs text-gray-400 mb-4 font-mono">Select a Google Account to authorize connection with Convoy:</p>
+
+              {/* Demo Accounts */}
+              <div className="flex flex-col gap-2 mb-4">
+                <button
+                  onClick={() => handleGoogleLoginSubmit('yash.chavan.google@gmail.com', 'Yash Chavan')}
+                  className="flex items-center gap-3 w-full p-3 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-xl text-left text-xs font-semibold text-white transition-all cursor-pointer active:scale-98"
+                >
+                  <div className="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-xs uppercase">
+                    YC
+                  </div>
+                  <div>
+                    <p className="font-bold">Yash Chavan</p>
+                    <p className="text-[10px] text-gray-500">yash.chavan.google@gmail.com</p>
+                  </div>
+                </button>
+
+                <button
+                  onClick={() => handleGoogleLoginSubmit('john.doe.google@gmail.com', 'John Doe')}
+                  className="flex items-center gap-3 w-full p-3 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-xl text-left text-xs font-semibold text-white transition-all cursor-pointer active:scale-98"
+                >
+                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs uppercase">
+                    JD
+                  </div>
+                  <div>
+                    <p className="font-bold">John Doe</p>
+                    <p className="text-[10px] text-gray-500">john.doe.google@gmail.com</p>
+                  </div>
+                </button>
+              </div>
+
+              {/* Custom Simulation Entry */}
+              <div className="border-t border-white/5 pt-4">
+                <p className="text-[10px] text-gray-400 font-mono mb-2">OR ENTER MOCK GATEWAY PARAMETERS</p>
+                <div className="space-y-2">
+                  <input
+                    type="text"
+                    placeholder="Full Name"
+                    value={googleCustomName}
+                    onChange={(e) => setGoogleCustomName(e.target.value)}
+                    className="w-full bg-[#1c1b1d] border border-white/10 rounded-lg py-2 px-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                  />
+                  <input
+                    type="email"
+                    placeholder="Google Email"
+                    value={googleCustomEmail}
+                    onChange={(e) => setGoogleCustomEmail(e.target.value)}
+                    className="w-full bg-[#1c1b1d] border border-white/10 rounded-lg py-2 px-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (googleCustomEmail && googleCustomName) {
+                        handleGoogleLoginSubmit(googleCustomEmail, googleCustomName);
+                      } else {
+                        alert('Provide both simulated profile parameters.');
+                      }
+                    }}
+                    className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                  >
+                    Authenticate Gateway
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 };
