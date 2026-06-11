@@ -8,7 +8,7 @@ import {
   Users, UserPlus, DollarSign, Compass, Activity,
   ShieldAlert, Plus, Fuel, Coffee, Bed, Flag, MoreHorizontal,
   CheckCircle2, Circle, ChevronDown, ChevronUp, Edit3,
-  Navigation, AlertTriangle, X, Send, Phone, Radio
+  Navigation, AlertTriangle, X, Send, Radio
 } from 'lucide-react';
 import { io } from 'socket.io-client';
 
@@ -660,22 +660,7 @@ const TripDetailView = () => {
                     {!sosLocation && (
                       <p className="text-[10px] text-amber-400">⚠️ GPS unavailable — location not attached. Enable location for better results.</p>
                     )}
-
-                    {/* Emergency call buttons */}
-                    <div className="grid grid-cols-2 gap-2">
-                      <a
-                        href="tel:112"
-                        className="flex items-center justify-center gap-1.5 py-2.5 bg-red-500/20 border border-red-500/40 text-red-400 rounded-xl text-xs font-bold active:scale-95 transition-all"
-                      >
-                        <Phone size={12} /> Call 112
-                      </a>
-                      <a
-                        href="tel:100"
-                        className="flex items-center justify-center gap-1.5 py-2.5 bg-amber-500/20 border border-amber-500/40 text-amber-400 rounded-xl text-xs font-bold active:scale-95 transition-all"
-                      >
-                        <Phone size={12} /> Police 100
-                      </a>
-                    </div>
+                    {/* Emergency call buttons removed */}
                   </div>
                 )}
 
