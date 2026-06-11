@@ -23,7 +23,7 @@ const allowedOrigins = [
   'https://localhost',
   'http://localhost',
   'capacitor://localhost',
-  'https://YOUR_VERCEL_APP_URL.vercel.app'
+  'https://theconvoy.vercel.app'
 ];
 
 if (process.env.ALLOWED_ORIGINS) {
@@ -36,16 +36,19 @@ app.use(cors({
     // allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
-    const isAllowed = allowedOrigins.indexOf(origin) !== -1 ||
-                      origin.endsWith('.vercel.app') ||
-                      origin.startsWith('capacitor://') ||
-                      origin.startsWith('http://localhost') ||
-                      origin.startsWith('https://localhost') ||
-                      origin.includes('10.0.2.2') ||
-                      origin.includes('10.17.207.109') ||
-                      origin.includes('192.168.') ||
-                      origin.startsWith('http://10.') ||
-                      origin.startsWith('https://10.');
+    // Remove trailing slash for comparison if present
+    const cleanOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
+    
+    const isAllowed = allowedOrigins.indexOf(cleanOrigin) !== -1 ||
+                      cleanOrigin.endsWith('.vercel.app') ||
+                      cleanOrigin.startsWith('capacitor://') ||
+                      cleanOrigin.startsWith('http://localhost') ||
+                      cleanOrigin.startsWith('https://localhost') ||
+                      cleanOrigin.includes('10.0.2.2') ||
+                      cleanOrigin.includes('10.17.207.109') ||
+                      cleanOrigin.includes('192.168.') ||
+                      cleanOrigin.startsWith('http://10.') ||
+                      cleanOrigin.startsWith('https://10.');
 
     if (isAllowed) {
       return callback(null, true);
@@ -88,11 +91,12 @@ const io = new Server(server, {
   cors: {
     origin: function (origin, callback) {
       if (!origin) return callback(null, true);
-      const isAllowed = allowedOrigins.indexOf(origin) !== -1 ||
-                        origin.endsWith('.vercel.app') ||
-                        origin.startsWith('capacitor://') ||
-                        origin.startsWith('http://localhost') ||
-                        origin.startsWith('https://localhost') ||
+      const cleanOrigin = origin.endsWith('/') ? origin.slice(0, -1) : origin;
+      const isAllowed = allowedOrigins.indexOf(cleanOrigin) !== -1 ||
+                        cleanOrigin.endsWith('.vercel.app') ||
+                        cleanOrigin.startsWith('capacitor://') ||
+                        cleanOrigin.startsWith('http://localhost') ||
+                        cleanOrigin.startsWith('https://localhost') ||
                         origin.includes('10.0.2.2') ||
                         origin.includes('10.17.207.109') ||
                         origin.includes('192.168.') ||
