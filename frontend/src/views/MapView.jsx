@@ -3,7 +3,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import Map, { Marker, Source, Layer } from 'react-map-gl/mapbox';
 import 'mapbox-gl/dist/mapbox-gl.css';
 import { io } from 'socket.io-client';
-import { Navigation, Search, Crosshair, Layers, Compass, ArrowLeft, X, AlertTriangle, Wifi, Activity, Users, Locate } from 'lucide-react';
+import { Navigation, Search, Crosshair, Layers, Compass, ArrowLeft, X, AlertTriangle, Wifi, Activity, Users, Locate, Battery } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
 import { Capacitor } from '@capacitor/core';
@@ -196,52 +196,38 @@ const MapView = () => {
   const [rideDuration,  setRideDuration]  = useState(0);
   const [incomingSOS,   setIncomingSOS]   = useState(null);
 
-  // Motorcycle sensor telemetry states
-  const [engineTemp,    setEngineTemp]    = useState(88.4);
-  const [voltage,       setVoltage]       = useState(14.2);
-  const [leanAngle,     setLeanAngle]     = useState(0);
-  const [fuelLevel,     setFuelLevel]     = useState(74);
+  // Real-world telemetry states
+  const [gpsAccuracy,   setGpsAccuracy]   = useState(null);
+  const [gpsHeading,    setGpsHeading]    = useState(null);
+  const [deviceBattery, setDeviceBattery] = useState(null);
 
-  const gear = speed === 0 ? 'N' :
-               speed < 15 ? '1' :
-               speed < 30 ? '2' :
-               speed < 50 ? '3' :
-               speed < 70 ? '4' :
-               speed < 95 ? '5' : '6';
+  // Real device battery monitor
+  useEffect(() => {
+    if (navigator.getBattery) {
+      navigator.getBattery().then((battery) => {
+        setDeviceBattery(Math.round(battery.level * 100));
+        battery.addEventListener('levelchange', () => {
+          setDeviceBattery(Math.round(battery.level * 100));
+        });
+      });
+    }
+  }, []);
 
-  const getRPM = () => {
-    if (gear === 'N') return 1200 + Math.floor(Math.random() * 80);
-    const gearRatios = { '1': 110, '2': 75, '3': 50, '4': 38, '5': 28, '6': 22 };
-    const ratio = gearRatios[gear] || 25;
-    const targetRpm = Math.round(speed * ratio + 1000);
-    return Math.max(1000, Math.min(9500, targetRpm + Math.floor(Math.random() * 120) - 60));
+  const formatTime = (secs) => {
+    const h = Math.floor(secs / 3600);
+    const m = Math.floor((secs % 3600) / 60);
+    const s = secs % 60;
+    return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const rpm = getRPM();
+  const avgSpeed = rideDuration > 0 ? Math.round((rideDistance / (rideDuration / 3600))) : 0;
 
-  // Periodic sensor telemetry updater effect
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setEngineTemp(prev => {
-        const delta = (Math.random() - 0.5) * 0.4;
-        const base = speed > 0 ? 94.2 : 88.4;
-        const next = prev + delta;
-        const final = next + (base - next) * 0.05;
-        return parseFloat(final.toFixed(1));
-      });
-      setVoltage(prev => {
-        const delta = (Math.random() - 0.5) * 0.04;
-        return parseFloat(Math.min(14.4, Math.max(13.8, prev + delta)).toFixed(2));
-      });
-      setLeanAngle(prev => {
-        if (speed === 0) return 0;
-        const delta = (Math.random() - 0.5) * 5;
-        return Math.min(25, Math.max(-25, Math.round(prev + delta)));
-      });
-      setFuelLevel(prev => Math.max(5, parseFloat((prev - 0.002).toFixed(3))));
-    }, 400);
-    return () => clearInterval(interval);
-  }, [speed]);
+  const getCompassDirection = (deg) => {
+    if (deg === null || deg === undefined || isNaN(deg)) return 'N';
+    const directions = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW'];
+    const index = Math.round(((deg % 360) / 22.5)) % 16;
+    return directions[index];
+  };
 
   // Refs
   const socketRef        = useRef(null);
@@ -466,9 +452,14 @@ const MapView = () => {
     if (navigator.geolocation) {
       watchId = navigator.geolocation.watchPosition(
         (pos) => {
-          const { latitude, longitude, speed: gpsSpeed, heading } = pos.coords;
+          const { latitude, longitude, speed: gpsSpeed, heading, accuracy } = pos.coords;
           const kmH = gpsSpeed ? Math.round(gpsSpeed * 3.6) : 0;
           setSpeed(kmH);
+          setGpsAccuracy(accuracy);
+          if (heading !== null && heading !== undefined) {
+            setGpsHeading(heading);
+            headingRef.current = heading;
+          }
           
           setUserLocation((prev) => {
             const next = { latitude, longitude };
@@ -482,7 +473,6 @@ const MapView = () => {
             return next;
           });
           setLocationError(null);
-          if (heading !== null) headingRef.current = heading;
 
           if (!hasCenteredRef.current) {
             setViewState(prev => ({ ...prev, latitude, longitude }));
@@ -1233,70 +1223,77 @@ const MapView = () => {
                 transition={{ duration: 0.25 }}
                 className="w-full bg-[#1c1b1d]/95 backdrop-blur-xl border border-white/15 p-4 rounded-2xl shadow-2xl flex flex-col gap-3.5 text-white relative overflow-hidden"
               >
-                {/* Top glow line */}
-                <div className="absolute top-0 left-0 w-full h-[1.5px] bg-gradient-to-r from-transparent via-blue-500/80 to-transparent" />
+                {/* Top glow line - dynamic color based on GPS signal */}
+                <div className={`absolute top-0 left-0 w-full h-[1.5px] bg-gradient-to-r from-transparent ${gpsAccuracy && gpsAccuracy <= 15 ? 'via-emerald-500/80' : 'via-blue-500/80'} to-transparent`} />
 
-                {/* Top Row: Speed, Gear, and RPM */}
-                <div className="flex justify-between items-center">
-                  {/* Gear Box */}
-                  <div className="flex flex-col items-center justify-center bg-blue-500/10 border border-blue-500/30 w-12 h-12 rounded-xl">
-                    <span className="text-[7px] font-mono text-blue-400 uppercase tracking-wider leading-none">GEAR</span>
-                    <span className={`text-xl font-black ${gear === 'N' ? 'text-amber-400' : 'text-blue-400'} leading-none mt-1`}>
-                      {gear}
+                {/* Top Row: GPS Signal, Speed, Compass */}
+                <div className="flex justify-between items-center px-1">
+                  {/* GPS Accuracy Box */}
+                  <div className="flex flex-col items-start w-28">
+                    <div className="flex items-center gap-1">
+                      <Wifi size={12} className={gpsAccuracy && gpsAccuracy <= 15 ? 'text-emerald-400 animate-pulse' : 'text-blue-400'} />
+                      <span className="text-[7px] font-mono text-gray-400 uppercase tracking-wider leading-none">GPS RADAR</span>
+                    </div>
+                    <span className="text-[10px] font-bold text-gray-300 font-mono mt-1">
+                      {gpsAccuracy !== null 
+                        ? (gpsAccuracy <= 15 ? `Strong (±${Math.round(gpsAccuracy)}m)` : `Medium (±${Math.round(gpsAccuracy)}m)`)
+                        : 'Searching GPS...'
+                      }
                     </span>
                   </div>
 
                   {/* Speedometer */}
                   <div className="flex-1 flex flex-col items-center">
-                    <span className="text-[7px] font-mono text-gray-400 uppercase tracking-widest leading-none">SPEED</span>
+                    <span className="text-[7px] font-mono text-gray-500 uppercase tracking-widest leading-none">SPEED</span>
                     <span className="text-3xl font-black text-white leading-none mt-1">
                       {speed} <span className="text-xs font-bold text-gray-400">km/h</span>
                     </span>
                   </div>
 
-                  {/* RPM Display */}
-                  <div className="flex flex-col items-end w-20">
-                    <span className="text-[7px] font-mono text-gray-400 uppercase tracking-widest leading-none">ENGINE RPM</span>
-                    <span className="text-sm font-extrabold text-white leading-none mt-1 font-mono">{rpm}</span>
-                    {/* RPM Indicator Bar */}
-                    <div className="w-full bg-white/10 h-1.5 rounded-full mt-1.5 overflow-hidden">
-                      <div 
-                        className={`h-full rounded-full transition-all duration-300 ${
-                          rpm > 8000 ? 'bg-red-500 animate-pulse' :
-                          rpm > 6000 ? 'bg-amber-400' : 'bg-emerald-400'
-                        }`}
-                        style={{ width: `${(rpm / 9500) * 100}%` }}
-                      />
+                  {/* Compass Box */}
+                  <div className="flex flex-col items-end w-28">
+                    <div className="flex items-center gap-1">
+                      <span className="text-[7px] font-mono text-gray-400 uppercase tracking-wider leading-none">COURSE</span>
+                      <Compass size={12} className="text-blue-400" />
                     </div>
+                    <span className="text-[10px] font-bold text-gray-300 font-mono mt-1">
+                      {gpsHeading !== null 
+                        ? `${getCompassDirection(gpsHeading)} (${Math.round(gpsHeading)}°)`
+                        : 'N/A'
+                      }
+                    </span>
                   </div>
                 </div>
 
                 {/* Divider */}
                 <div className="h-[1px] w-full bg-white/5" />
 
-                {/* Bottom Row: lean angle, temp, volt, fuel */}
+                {/* Bottom Row: Odometer, Duration, Avg Speed, Battery */}
                 <div className="grid grid-cols-4 gap-2">
-                  {/* Temp */}
+                  {/* Odometer */}
                   <div className="flex flex-col items-center bg-[#201f22]/40 border border-white/5 p-1.5 rounded-xl">
-                    <span className="text-[7px] font-mono text-gray-500 uppercase tracking-wider">TEMP</span>
-                    <span className="text-[11px] font-extrabold text-gray-300 mt-0.5">{engineTemp}°C</span>
+                    <span className="text-[7px] font-mono text-gray-500 uppercase tracking-wider">ODOMETER</span>
+                    <span className="text-[11px] font-extrabold text-gray-300 mt-0.5">{rideDistance.toFixed(2)} km</span>
                   </div>
-                  {/* Lean Angle */}
+                  {/* Elapsed Timer */}
                   <div className="flex flex-col items-center bg-[#201f22]/40 border border-white/5 p-1.5 rounded-xl">
-                    <span className="text-[7px] font-mono text-gray-500 uppercase tracking-wider">LEAN</span>
+                    <span className="text-[7px] font-mono text-gray-500 uppercase tracking-wider">DURATION</span>
+                    <span className="text-[11px] font-extrabold text-gray-300 mt-0.5">{formatTime(rideDuration)}</span>
+                  </div>
+                  {/* Avg Speed */}
+                  <div className="flex flex-col items-center bg-[#201f22]/40 border border-white/5 p-1.5 rounded-xl">
+                    <span className="text-[7px] font-mono text-gray-500 uppercase tracking-wider">AVG SPEED</span>
+                    <span className="text-[11px] font-extrabold text-gray-300 mt-0.5">{avgSpeed} km/h</span>
+                  </div>
+                  {/* Phone Battery */}
+                  <div className="flex flex-col items-center bg-[#201f22]/40 border border-white/5 p-1.5 rounded-xl">
+                    <div className="flex items-center gap-0.5">
+                      <Battery size={9} className="text-emerald-400" />
+                      <span className="text-[7px] font-mono text-gray-500 uppercase tracking-wider">BATTERY</span>
+                    </div>
                     <span className="text-[11px] font-extrabold text-gray-300 mt-0.5">
-                      {leanAngle > 0 ? `R ${leanAngle}°` : leanAngle < 0 ? `L ${Math.abs(leanAngle)}°` : '0°'}
+                      {deviceBattery !== null ? `${deviceBattery}%` : '---'}
                     </span>
-                  </div>
-                  {/* Battery Voltage */}
-                  <div className="flex flex-col items-center bg-[#201f22]/40 border border-white/5 p-1.5 rounded-xl">
-                    <span className="text-[7px] font-mono text-gray-500 uppercase tracking-wider">BATT</span>
-                    <span className="text-[11px] font-extrabold text-gray-300 mt-0.5">{voltage}V</span>
-                  </div>
-                  {/* Fuel level */}
-                  <div className="flex flex-col items-center bg-[#201f22]/40 border border-white/5 p-1.5 rounded-xl">
-                    <span className="text-[7px] font-mono text-gray-500 uppercase tracking-wider">FUEL</span>
-                    <span className="text-[11px] font-extrabold text-gray-300 mt-0.5">{Math.round(fuelLevel)}%</span>
                   </div>
                 </div>
 
@@ -1310,18 +1307,29 @@ const MapView = () => {
                         <Navigation size={10} className="text-blue-400 transform rotate-45 shrink-0" />
                         <span className="text-[9px] font-bold text-blue-300 truncate">{destination.name}</span>
                       </div>
-                      {destEta ? (
-                        <span className="text-[10px] font-bold text-gray-300 font-mono">
-                          {destEta} · {destKm} km · {destArrival}
-                        </span>
-                      ) : (
-                        <span className="text-[8px] text-gray-500 font-mono animate-pulse">Calculating route...</span>
-                      )}
+                      <div className="flex items-center gap-2">
+                        {destEta ? (
+                          <span className="text-[10px] font-bold text-gray-300 font-mono">
+                            {destEta} · {destKm} km · {destArrival}
+                          </span>
+                        ) : (
+                          <span className="text-[8px] text-gray-500 font-mono animate-pulse">Calculating route...</span>
+                        )}
+                        <div className="h-3 w-[1px] bg-white/10" />
+                        <div className="flex items-center gap-1 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded text-[8px] font-bold font-mono">
+                          <Users size={8} /> {riders.length + 1} PILOTS
+                        </div>
+                      </div>
                     </div>
                   ) : (
-                    <div className="flex items-center gap-1.5 text-gray-500">
-                      <Navigation size={10} className="shrink-0" />
-                      <span className="text-[9px] font-semibold">No active destination</span>
+                    <div className="flex items-center justify-between w-full text-gray-500">
+                      <div className="flex items-center gap-1.5">
+                        <Navigation size={10} className="shrink-0" />
+                        <span className="text-[9px] font-semibold">No active destination</span>
+                      </div>
+                      <div className="flex items-center gap-1 text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 px-1.5 py-0.5 rounded text-[8px] font-bold font-mono">
+                        <Users size={8} /> {riders.length + 1} PILOTS
+                      </div>
                     </div>
                   )}
                 </div>
