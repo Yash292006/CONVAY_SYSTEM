@@ -18,10 +18,13 @@ const LoginView = () => {
   const [newPassword, setNewPassword] = useState('');
   const [otpSent, setOtpSent] = useState(false);
   
-  // Google Simulation States
-  const [showGoogleModal, setShowGoogleModal] = useState(false);
-  const [googleCustomEmail, setGoogleCustomEmail] = useState('');
-  const [googleCustomName, setGoogleCustomName] = useState('');
+  // OAuth Simulation States
+  const [oauthProvider, setOauthProvider] = useState(null); // 'Google' | 'GitHub' | 'Apple' | null
+  const [oauthEmail, setOauthEmail] = useState('');
+  const [oauthPassword, setOauthPassword] = useState('');
+  const [oauthName, setOauthName] = useState('');
+  const [oauthStep, setOauthStep] = useState('input'); // 'input' | 'authorizing' | 'success'
+  const [oauthLogs, setOauthLogs] = useState([]);
 
   const [error, setError] = useState('');
   const [loadingForm, setLoadingForm] = useState(false);
@@ -349,7 +352,7 @@ const LoginView = () => {
     }
     setLoadingForm(true);
     try {
-      const res = await axios.post('/api/auth/forgot-password', { email });
+      const res = await axios.post('/auth/forgot-password', { email });
       setLoadingForm(false);
       setOtpSent(true);
       setActiveTab('reset');
@@ -369,7 +372,7 @@ const LoginView = () => {
     }
     setLoadingForm(true);
     try {
-      await axios.post('/api/auth/reset-password', { email, otp, newPassword });
+      await axios.post('/auth/reset-password', { email, otp, newPassword });
       setLoadingForm(false);
       alert('Override code authorized! Access code updated successfully.');
       setActiveTab('signin');
@@ -382,22 +385,53 @@ const LoginView = () => {
     }
   };
 
-  const handleGoogleLoginSubmit = async (customEmail, customName) => {
-    setError('');
-    setLoadingForm(true);
-    setShowGoogleModal(false);
-    try {
-      const res = await loginWithGoogle(customEmail, customName);
-      setLoadingForm(false);
-      if (res.success) {
-        navigate('/');
-      } else {
-        setError(res.message);
-      }
-    } catch (err) {
-      setLoadingForm(false);
-      setError('Google authenticating gateway timed out.');
+  const handleOAuthSubmit = async (e) => {
+    e.preventDefault();
+    if (!oauthEmail || !oauthPassword) {
+      alert('Please fill in both email and password credentials.');
+      return;
     }
+    setOauthStep('authorizing');
+    setOauthLogs(['Handshaking with ' + oauthProvider + ' servers...']);
+    
+    // Add realistic security authorization step-logs
+    setTimeout(() => {
+      setOauthLogs(prev => [...prev, 'Authenticating user: ' + oauthEmail]);
+    }, 500);
+
+    setTimeout(() => {
+      setOauthLogs(prev => [...prev, 'Verifying secure cryptographic credentials...']);
+    }, 1000);
+
+    setTimeout(() => {
+      setOauthLogs(prev => [...prev, 'Exchanging secure JWT session tokens...']);
+    }, 1500);
+
+    setTimeout(async () => {
+      try {
+        const defaultName = oauthName || oauthEmail.split('@')[0].toUpperCase();
+        const res = await loginWithGoogle(oauthEmail, defaultName);
+        if (res.success) {
+          setOauthStep('success');
+          setOauthLogs(prev => [...prev, '✓ Secure Authorization Granted!']);
+          setTimeout(() => {
+            setOauthProvider(null);
+            setOauthStep('input');
+            setOauthEmail('');
+            setOauthPassword('');
+            setOauthName('');
+            setOauthLogs([]);
+            navigate('/');
+          }, 1000);
+        } else {
+          setOauthStep('input');
+          alert(res.message);
+        }
+      } catch (err) {
+        setOauthStep('input');
+        alert('Authentication failed.');
+      }
+    }, 2200);
   };
 
   return (
@@ -698,7 +732,7 @@ const LoginView = () => {
                 {/* Google Sign In */}
                 <button
                   type="button"
-                  onClick={() => setShowGoogleModal(true)}
+                  onClick={() => { setOauthProvider('Google'); setOauthStep('input'); }}
                   className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-xl text-xs font-bold text-white transition-all active:scale-95 cursor-pointer shadow-lg w-1/3"
                   title="Authenticate via Google Gateway"
                 >
@@ -711,7 +745,7 @@ const LoginView = () => {
                 {/* GitHub Sign In */}
                 <button
                   type="button"
-                  onClick={() => handleGoogleLoginSubmit('github.crew@convoy.net', 'GitHub Rider')}
+                  onClick={() => { setOauthProvider('GitHub'); setOauthStep('input'); }}
                   className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-xl text-xs font-bold text-white transition-all active:scale-95 cursor-pointer shadow-lg w-1/3"
                   title="Authenticate via GitHub Gateway"
                 >
@@ -724,7 +758,7 @@ const LoginView = () => {
                 {/* Apple Sign In */}
                 <button
                   type="button"
-                  onClick={() => handleGoogleLoginSubmit('apple.crew@convoy.net', 'Apple Rider')}
+                  onClick={() => { setOauthProvider('Apple'); setOauthStep('input'); }}
                   className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white/5 hover:bg-white/10 border border-white/10 hover:border-white/20 rounded-xl text-xs font-bold text-white transition-all active:scale-95 cursor-pointer shadow-lg w-1/3"
                   title="Authenticate via Apple Keyring"
                 >
@@ -737,103 +771,203 @@ const LoginView = () => {
         </div>
       </div>
 
-      {/* ── GOOGLE ACCOUNT CHOOSER MODAL ── */}
+      {/* ── GOOGLE / GITHUB / APPLE SECURE OAUTH POPUP SIMULATION ── */}
       <AnimatePresence>
-        {showGoogleModal && (
+        {oauthProvider && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-md p-4"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md p-4"
           >
             <motion.div
-              initial={{ scale: 0.9, y: 20 }}
+              initial={{ scale: 0.95, y: 30 }}
               animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="w-full max-w-sm bg-[#131315] border border-white/10 rounded-2xl shadow-2xl p-6 relative overflow-hidden"
+              exit={{ scale: 0.95, y: 30 }}
+              className="w-full max-w-md bg-[#131315] border border-white/15 rounded-2xl shadow-2xl overflow-hidden flex flex-col"
             >
-              {/* Dynamic top bar accent */}
-              <div className="absolute top-0 left-0 w-full h-[3px] bg-gradient-to-r from-blue-500 via-red-500 to-yellow-500" />
-              
-              <div className="flex justify-between items-center mb-6">
-                <div className="flex items-center gap-2">
-                  <svg className="w-5 h-5 text-blue-400" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M12.24 10.285V13.4h6.887C18.2 15.614 15.645 18 12.24 18c-3.86 0-7-3.14-7-7s3.14-7 7-7c1.706 0 3.267.615 4.477 1.625l2.437-2.435C17.387 1.696 14.996 1 12.24 1c-5.523 0-10 4.477-10 10s4.477 10 10 10c5.733 0 9.87-4.014 9.87-9.872 0-.67-.06-1.3-.176-1.843H12.24z"/>
-                  </svg>
-                  <h3 className="text-sm font-bold text-white uppercase tracking-wider font-mono">Sign in with Google</h3>
+              {/* Virtual Browser Top Address Bar */}
+              <div className="bg-[#1c1b1d] border-b border-white/10 px-4 py-3 flex items-center gap-3">
+                {/* Windows dots */}
+                <div className="flex gap-1.5 shrink-0">
+                  <span className="w-3 h-3 rounded-full bg-red-500/80 block" />
+                  <span className="w-3 h-3 rounded-full bg-yellow-500/80 block" />
+                  <span className="w-3 h-3 rounded-full bg-green-500/80 block" />
                 </div>
+                {/* Navigation helpers */}
+                <div className="flex gap-2 text-gray-500 text-xs shrink-0 select-none">
+                  <span>←</span>
+                  <span>→</span>
+                  <span>↻</span>
+                </div>
+                {/* Secure URL bar */}
+                <div className="flex-1 bg-[#0a0b0d] border border-white/10 rounded-lg py-1 px-3 flex items-center gap-1.5 text-[10px] font-mono text-gray-400 truncate">
+                  <span className="text-emerald-500">🔒</span>
+                  <span className="text-emerald-400 select-none">https://</span>
+                  <span className="text-white truncate">
+                    {oauthProvider === 'Google' && 'accounts.google.com/o/oauth2/v2/auth'}
+                    {oauthProvider === 'GitHub' && 'github.com/login/oauth/authorize'}
+                    {oauthProvider === 'Apple' && 'appleid.apple.com/auth/authorize'}
+                  </span>
+                </div>
+                {/* Close window */}
                 <button
                   type="button"
-                  onClick={() => setShowGoogleModal(false)}
-                  className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-white cursor-pointer text-xs transition-colors"
+                  onClick={() => setOauthProvider(null)}
+                  className="w-6 h-6 rounded-full bg-white/5 hover:bg-white/10 flex items-center justify-center text-gray-400 hover:text-white cursor-pointer text-xs transition-colors shrink-0"
                 >
                   ✕
                 </button>
               </div>
 
-              <p className="text-xs text-gray-400 mb-4 font-mono">Select a Google Account to authorize connection with Convoy:</p>
+              {/* Viewport Content */}
+              <div className="p-6 md:p-8 bg-[#0a0b0d] min-h-[340px] flex flex-col justify-center">
+                <AnimatePresence mode="wait">
+                  {oauthStep === 'input' && (
+                    <motion.div
+                      key="oauth-input"
+                      initial={{ opacity: 0, x: -10 }}
+                      animate={{ opacity: 1, x: 0 }}
+                      exit={{ opacity: 0, x: 10 }}
+                      className="space-y-4"
+                    >
+                      <div className="text-center mb-4">
+                        {/* Logo header */}
+                        {oauthProvider === 'Google' && (
+                          <div className="flex justify-center mb-2">
+                            <svg className="w-8 h-8" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M12.24 10.285V13.4h6.887C18.2 15.614 15.645 18 12.24 18c-3.86 0-7-3.14-7-7s3.14-7 7-7c1.706 0 3.267.615 4.477 1.625l2.437-2.435C17.387 1.696 14.996 1 12.24 1c-5.523 0-10 4.477-10 10s4.477 10 10 10c5.733 0 9.87-4.014 9.87-9.872 0-.67-.06-1.3-.176-1.843H12.24z" fill="#4285F4"/>
+                            </svg>
+                          </div>
+                        )}
+                        {oauthProvider === 'GitHub' && (
+                          <div className="flex justify-center mb-2">
+                            <svg className="w-8 h-8 text-white" viewBox="0 0 24 24" fill="currentColor">
+                              <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+                            </svg>
+                          </div>
+                        )}
+                        {oauthProvider === 'Apple' && (
+                          <div className="flex justify-center mb-2">
+                            <span className="text-3xl font-black text-white"></span>
+                          </div>
+                        )}
+                        <h4 className="text-sm font-bold text-white font-mono uppercase tracking-wider">Authorize with {oauthProvider}</h4>
+                        <p className="text-[10px] text-gray-500 font-mono mt-0.5">Secure commlink mapping verification required</p>
+                      </div>
 
-              {/* Demo Accounts */}
-              <div className="flex flex-col gap-2 mb-4">
-                <button
-                  onClick={() => handleGoogleLoginSubmit('yash.chavan.google@gmail.com', 'Yash Chavan')}
-                  className="flex items-center gap-3 w-full p-3 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-xl text-left text-xs font-semibold text-white transition-all cursor-pointer active:scale-98"
-                >
-                  <div className="w-8 h-8 rounded-full bg-blue-500/20 text-blue-400 flex items-center justify-center font-bold text-xs uppercase">
-                    YC
-                  </div>
-                  <div>
-                    <p className="font-bold">Yash Chavan</p>
-                    <p className="text-[10px] text-gray-500">yash.chavan.google@gmail.com</p>
-                  </div>
-                </button>
+                      {/* Credentials Input */}
+                      <form onSubmit={handleOAuthSubmit} className="space-y-3">
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-mono text-gray-400 uppercase">{oauthProvider} CALLSIGN / EMAIL</label>
+                          <input
+                            type="email"
+                            required
+                            placeholder="rider@provider.net"
+                            value={oauthEmail}
+                            onChange={(e) => setOauthEmail(e.target.value)}
+                            className="w-full bg-[#131315] border border-white/10 rounded-lg py-2.5 px-3 text-xs text-white focus:outline-none focus:border-primary font-mono"
+                          />
+                        </div>
 
-                <button
-                  onClick={() => handleGoogleLoginSubmit('john.doe.google@gmail.com', 'John Doe')}
-                  className="flex items-center gap-3 w-full p-3 bg-white/5 hover:bg-white/10 border border-white/5 hover:border-white/10 rounded-xl text-left text-xs font-semibold text-white transition-all cursor-pointer active:scale-98"
-                >
-                  <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center font-bold text-xs uppercase">
-                    JD
-                  </div>
-                  <div>
-                    <p className="font-bold">John Doe</p>
-                    <p className="text-[10px] text-gray-500">john.doe.google@gmail.com</p>
-                  </div>
-                </button>
-              </div>
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-mono text-gray-400 uppercase">ACCESS CODE / PASSWORD</label>
+                          <input
+                            type="password"
+                            required
+                            placeholder="••••••••"
+                            value={oauthPassword}
+                            onChange={(e) => setOauthPassword(e.target.value)}
+                            className="w-full bg-[#131315] border border-white/10 rounded-lg py-2.5 px-3 text-xs text-white focus:outline-none focus:border-primary font-mono"
+                          />
+                        </div>
 
-              {/* Custom Simulation Entry */}
-              <div className="border-t border-white/5 pt-4">
-                <p className="text-[10px] text-gray-400 font-mono mb-2">OR ENTER MOCK GATEWAY PARAMETERS</p>
-                <div className="space-y-2">
-                  <input
-                    type="text"
-                    placeholder="Full Name"
-                    value={googleCustomName}
-                    onChange={(e) => setGoogleCustomName(e.target.value)}
-                    className="w-full bg-[#1c1b1d] border border-white/10 rounded-lg py-2 px-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-                  />
-                  <input
-                    type="email"
-                    placeholder="Google Email"
-                    value={googleCustomEmail}
-                    onChange={(e) => setGoogleCustomEmail(e.target.value)}
-                    className="w-full bg-[#1c1b1d] border border-white/10 rounded-lg py-2 px-3 text-xs text-white placeholder-gray-500 focus:outline-none focus:border-blue-500"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (googleCustomEmail && googleCustomName) {
-                        handleGoogleLoginSubmit(googleCustomEmail, googleCustomName);
-                      } else {
-                        alert('Provide both simulated profile parameters.');
-                      }
-                    }}
-                    className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold rounded-lg transition-colors cursor-pointer"
-                  >
-                    Authenticate Gateway
-                  </button>
-                </div>
+                        {/* Optional name */}
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-mono text-gray-400 uppercase">DISPLAY NAME (OPTIONAL)</label>
+                          <input
+                            type="text"
+                            placeholder="RIDER_ALIAS"
+                            value={oauthName}
+                            onChange={(e) => setOauthName(e.target.value)}
+                            className="w-full bg-[#131315] border border-white/10 rounded-lg py-2.5 px-3 text-xs text-white focus:outline-none focus:border-primary font-mono"
+                          />
+                        </div>
+
+                        {/* Fast Select Demo Accounts */}
+                        <div className="bg-[#1c1b1d]/40 border border-white/5 rounded-xl p-3 space-y-2">
+                          <p className="text-[9px] font-mono text-gray-500 uppercase tracking-wider">Fast Simulation Presets</p>
+                          <div className="flex flex-wrap gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOauthEmail(oauthProvider === 'Google' ? 'yash.chavan.google@gmail.com' : oauthProvider === 'GitHub' ? 'github.rider@convoy.net' : 'apple.rider@convoy.net');
+                                setOauthPassword('securepass123');
+                                setOauthName(oauthProvider === 'Google' ? 'Yash Chavan' : oauthProvider === 'GitHub' ? 'GitHub Rider' : 'Apple Rider');
+                              }}
+                              className="text-[9px] font-mono bg-white/5 hover:bg-white/10 border border-white/10 px-2.5 py-1 rounded text-gray-300 cursor-pointer"
+                            >
+                              🚀 Load Mock Profile
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setOauthEmail('john.doe.google@gmail.com');
+                                setOauthPassword('password123');
+                                setOauthName('John Doe');
+                              }}
+                              className="text-[9px] font-mono bg-white/5 hover:bg-white/10 border border-white/10 px-2.5 py-1 rounded text-gray-300 cursor-pointer"
+                            >
+                              🏍️ John Doe
+                            </button>
+                          </div>
+                        </div>
+
+                        <button
+                          type="submit"
+                          className="w-full py-3 bg-primary/20 border border-primary hover:bg-primary hover:text-on-primary text-primary text-xs font-bold rounded-xl transition-all cursor-pointer font-mono uppercase tracking-wider mt-4"
+                        >
+                          Verify & Authorize
+                        </button>
+                      </form>
+                    </motion.div>
+                  )}
+
+                  {oauthStep === 'authorizing' && (
+                    <motion.div
+                      key="oauth-authorizing"
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 1.1 }}
+                      className="flex flex-col items-center justify-center space-y-6"
+                    >
+                      <div className="h-12 w-12 animate-spin rounded-full border-4 border-primary border-t-transparent" />
+                      <div className="w-full bg-[#131315]/50 border border-white/5 rounded-xl p-4 min-h-[120px] font-mono text-[10px] text-gray-400 space-y-1 overflow-y-auto">
+                        {oauthLogs.map((log, index) => (
+                          <div key={index} className="flex gap-1.5 items-center">
+                            <span className="text-emerald-500">▶</span>
+                            <span>{log}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </motion.div>
+                  )}
+
+                  {oauthStep === 'success' && (
+                    <motion.div
+                      key="oauth-success"
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      className="flex flex-col items-center justify-center space-y-4"
+                    >
+                      <div className="h-16 w-16 bg-emerald-500/20 border border-emerald-500/50 rounded-full flex items-center justify-center text-3xl shadow-[0_0_20px_rgba(16,185,129,0.3)] animate-pulse">
+                        ✓
+                      </div>
+                      <h4 className="text-sm font-bold text-emerald-400 font-mono uppercase tracking-widest animate-pulse">Authorization Success</h4>
+                      <p className="text-[10px] text-gray-500 font-mono text-center">Syncing radar coordinates and vehicle telemetry...</p>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             </motion.div>
           </motion.div>
