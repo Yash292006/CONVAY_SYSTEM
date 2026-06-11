@@ -261,4 +261,67 @@ router.delete('/:id/waypoints/:wid', protect, async (req, res) => {
   }
 });
 
+
+// @desc    Get recent POIs (not older than 5 minutes) for a trip
+// @route   GET /api/trips/:id/pois
+// @access  Private
+router.get('/:id/pois', protect, async (req, res) => {
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) return res.status(404).json({ message: 'Trip not found' });
+
+    const fiveMinsAgo = Date.now() - 5 * 60 * 1000;
+    const activePois = (trip.pois || []).filter(p => new Date(p.timestamp).getTime() > fiveMinsAgo);
+
+    res.json(activePois);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @desc    Add a POI to a trip
+// @route   POST /api/trips/:id/pois
+// @access  Private
+router.post('/:id/pois', protect, async (req, res) => {
+  const { type, lat, lng, reportedBy } = req.body;
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) return res.status(404).json({ message: 'Trip not found' });
+
+    const newPoi = {
+      type,
+      lat: parseFloat(lat),
+      lng: parseFloat(lng),
+      reportedBy: reportedBy || req.user.name,
+      reportedById: req.user._id.toString(),
+      timestamp: new Date()
+    };
+
+    trip.pois.push(newPoi);
+    await trip.save();
+
+    const addedPoi = trip.pois[trip.pois.length - 1];
+    res.status(201).json(addedPoi);
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// @desc    Remove a POI from a trip
+// @route   DELETE /api/trips/:id/pois/:poiId
+// @access  Private
+router.delete('/:id/pois/:poiId', protect, async (req, res) => {
+  try {
+    const trip = await Trip.findById(req.params.id);
+    if (!trip) return res.status(404).json({ message: 'Trip not found' });
+
+    trip.pois.pull({ _id: req.params.poiId });
+    await trip.save();
+
+    res.json({ message: 'Hazard marker removed' });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
 export default router;

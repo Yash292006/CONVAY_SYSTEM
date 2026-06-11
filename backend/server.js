@@ -22,7 +22,8 @@ const allowedOrigins = [
   'http://localhost:5000',
   'https://localhost',
   'http://localhost',
-  'capacitor://localhost'
+  'capacitor://localhost',
+  'https://YOUR_VERCEL_APP_URL.vercel.app'
 ];
 
 if (process.env.ALLOWED_ORIGINS) {
@@ -36,6 +37,7 @@ app.use(cors({
     if (!origin) return callback(null, true);
     
     const isAllowed = allowedOrigins.indexOf(origin) !== -1 ||
+                      origin.endsWith('.vercel.app') ||
                       origin.startsWith('capacitor://') ||
                       origin.startsWith('http://localhost') ||
                       origin.startsWith('https://localhost') ||
@@ -87,6 +89,7 @@ const io = new Server(server, {
     origin: function (origin, callback) {
       if (!origin) return callback(null, true);
       const isAllowed = allowedOrigins.indexOf(origin) !== -1 ||
+                        origin.endsWith('.vercel.app') ||
                         origin.startsWith('capacitor://') ||
                         origin.startsWith('http://localhost') ||
                         origin.startsWith('https://localhost') ||
@@ -126,6 +129,21 @@ io.on('connection', (socket) => {
   // C. Listen for custom ping signals and broadcast to the trip room
   socket.on('pingRider', (data) => {
     socket.to(data.tripId).emit('pingReceived', data);
+  });
+
+  // D. Listen for custom POIs/Hazards and broadcast to the trip room
+  socket.on('reportPOI', (data) => {
+    socket.to(data.tripId).emit('poiReceived', data);
+  });
+
+  // E. Listen for POI/Hazard deletions and broadcast to the trip room
+  socket.on('deletePOI', (data) => {
+    socket.to(data.tripId).emit('poiDeleted', data);
+  });
+
+  // F. Listen for SOS alerts and broadcast to the trip room
+  socket.on('sosAlert', (data) => {
+    socket.to(data.tripId).emit('sosReceived', data);
   });
 
   socket.on('disconnect', () => {

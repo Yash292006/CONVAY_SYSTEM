@@ -11,6 +11,15 @@ const waypointSchema = new mongoose.Schema({
   estimatedTime: { type: String }
 }, { timestamps: true });
 
+const poiSchema = new mongoose.Schema({
+  type:        { type: String, enum: ['traffic', 'police', 'blockage', 'fuel'], required: true },
+  lat:         { type: Number, required: true },
+  lng:         { type: Number, required: true },
+  reportedBy:  { type: String, required: true },
+  reportedById:{ type: String, required: true },
+  timestamp:   { type: Date, default: Date.now }
+});
+
 const tripSchema = new mongoose.Schema({
   title: {
     type: String,
@@ -39,6 +48,7 @@ const tripSchema = new mongoose.Schema({
     lng: Number
   }],
   waypoints: [waypointSchema],
+  pois: [poiSchema],
   admin: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'User',

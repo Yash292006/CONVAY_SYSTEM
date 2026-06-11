@@ -16,7 +16,9 @@ import BottomNav from './components/BottomNav';
 
 // Configure Axios Defaults
 const getBaseURL = () => {
-  let url = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+  let url = import.meta.env.VITE_BACKEND_URL
+    ? `${import.meta.env.VITE_BACKEND_URL}/api`
+    : (import.meta.env.VITE_API_URL || 'http://localhost:5000/api');
   if (Capacitor.isNativePlatform()) {
     // Dynamically retrieve the local development machine IP, defaulting to Android loopback (10.0.2.2) if not specified
     const currentIP = import.meta.env.VITE_LOCAL_IP || '10.0.2.2';

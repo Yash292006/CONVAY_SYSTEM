@@ -8,8 +8,9 @@ import {
   Users, UserPlus, DollarSign, Compass, Activity,
   ShieldAlert, Plus, Fuel, Coffee, Bed, Flag, MoreHorizontal,
   CheckCircle2, Circle, ChevronDown, ChevronUp, Edit3,
-  Navigation, AlertTriangle, X, Send
+  Navigation, AlertTriangle, X, Send, Phone, Radio
 } from 'lucide-react';
+import { io } from 'socket.io-client';
 
 // ─── Waypoint type config ────────────────────────────────────────────────────
 const WP_TYPES = {
@@ -91,7 +92,114 @@ const TripDetailView = () => {
   const notesTimer = useRef(null);
 
   // SOS
-  const [sosActive, setSosActive] = useState(false);
+  const [sosActive,     setSosActive]     = useState(false);
+  const [sosCountdown,  setSosCountdown]  = useState(0);
+  const [sosLocation,   setSosLocation]   = useState(null);
+  const [sosSending,    setSosSending]    = useState(false);
+  const socketRef = useRef(null);
+  const sosTimerRef = useRef(null);
+
+  // ── Audio helper (Web Audio API) ───────────────────────────────────────────
+  const playAlarm = (type = 'sos') => {
+    try {
+      const AudioContext = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContext) return;
+      const ctx = new AudioContext();
+      const patterns = {
+        sos:     [[0, 440, 0.4], [0.5, 600, 0.4], [1.0, 880, 0.6], [1.7, 880, 0.6], [2.4, 880, 0.6]],
+        success: [[0, 523, 0.15], [0.18, 659, 0.15], [0.36, 784, 0.25]],
+        ping:    [[0, 880, 0.12], [0.18, 880, 0.12]],
+      };
+      (patterns[type] || patterns.ping).forEach(([delay, freq, dur]) => {
+        const osc  = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = type === 'sos' ? 'sawtooth' : 'sine';
+        osc.frequency.setValueAtTime(freq, ctx.currentTime);
+        gain.gain.setValueAtTime(0.3, ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(ctx.currentTime + delay);
+        osc.stop(ctx.currentTime + delay + dur);
+      });
+    } catch (e) { console.warn('Audio blocked:', e); }
+  };
+
+  // ── Socket connect for SOS ─────────────────────────────────────────────────
+  useEffect(() => {
+    const backendUrl = import.meta.env.VITE_BACKEND_URL || (import.meta.env.VITE_API_URL
+      ? import.meta.env.VITE_API_URL.replace('/api', '')
+      : 'http://localhost:5000');
+    socketRef.current = io(backendUrl, { timeout: 8000 });
+    if (id) socketRef.current.emit('joinTrip', id);
+
+    socketRef.current.on('sosReceived', (data) => {
+      // Only alert others (not the sender themselves again)
+      if (data.senderId !== user?._id) {
+        playAlarm('sos');
+        const coord = data.lat && data.lng
+          ? `\nGPS: ${data.lat.toFixed(5)}, ${data.lng.toFixed(5)}`
+          : '';
+        alert(`🚨 SOS from ${data.senderName}!\n${data.message}${coord}`);
+      }
+    });
+
+    return () => socketRef.current?.disconnect();
+  }, [id]);
+
+  // ── Real SOS Handler ───────────────────────────────────────────────────────
+  const handleSOS = async () => {
+    if (sosActive || sosSending) return;
+    setSosSending(true);
+
+    // 1. Try to get GPS location
+    let lat = null, lng = null;
+    try {
+      await new Promise((resolve) => {
+        navigator.geolocation?.getCurrentPosition(
+          (pos) => { lat = pos.coords.latitude; lng = pos.coords.longitude; resolve(); },
+          () => resolve(), // proceed even without GPS
+          { timeout: 4000, enableHighAccuracy: true }
+        );
+      });
+      if (lat) setSosLocation({ lat, lng });
+    } catch {}
+
+    // 2. Play SOS alarm
+    playAlarm('sos');
+
+    // 3. Broadcast via socket
+    const activeUser = user || JSON.parse(localStorage.getItem('convoyUser'));
+    socketRef.current?.emit('sosAlert', {
+      tripId:      id,
+      senderId:    activeUser?._id || activeUser?.id,
+      senderName:  activeUser?.name || 'A crew member',
+      message:     'NEEDS IMMEDIATE HELP!',
+      lat,
+      lng,
+      timestamp:   new Date().toISOString(),
+    });
+
+    setSosSending(false);
+    setSosActive(true);
+    setSosCountdown(30); // 30-second active window
+
+    // 4. Countdown
+    sosTimerRef.current = setInterval(() => {
+      setSosCountdown(prev => {
+        if (prev <= 1) {
+          clearInterval(sosTimerRef.current);
+          setSosActive(false);
+          setSosLocation(null);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+  };
+
+  // Cleanup timer on unmount
+  useEffect(() => () => clearInterval(sosTimerRef.current), []);
 
   // ─── Load trip ──────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -502,28 +610,94 @@ const TripDetailView = () => {
             </div>
 
             {/* SOS Section */}
-            <div className="bg-[#131416] border border-red-500/20 rounded-2xl p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="text-sm font-bold text-white flex items-center gap-2">
-                    <AlertTriangle size={15} className="text-red-400" /> SOS / Emergency
-                  </h2>
-                  <p className="text-[10px] text-gray-500 mt-1">Alert all crew members of an emergency</p>
+            <div className={`rounded-2xl p-5 border transition-all duration-300 ${
+              sosActive
+                ? 'bg-red-950/40 border-red-500/60 shadow-[0_0_30px_rgba(239,68,68,0.3)]'
+                : 'bg-[#131416] border-red-500/20'
+            }`}>
+              <div className="flex flex-col gap-4">
+                {/* Header */}
+                <div className="flex items-start justify-between">
+                  <div>
+                    <h2 className="text-sm font-bold text-white flex items-center gap-2">
+                      <AlertTriangle size={15} className={sosActive ? 'text-red-400 animate-pulse' : 'text-red-400'} />
+                      SOS / Emergency
+                    </h2>
+                    <p className="text-[10px] text-gray-500 mt-1">
+                      {sosActive
+                        ? `🚨 Signal broadcast to all ${trip.members?.length} crew members`
+                        : 'Instantly alert all crew members with your GPS location'}
+                    </p>
+                  </div>
+                  {sosActive && (
+                    <div className="flex items-center gap-1 bg-red-500/20 border border-red-500/40 rounded-lg px-2 py-1">
+                      <span className="w-2 h-2 rounded-full bg-red-400 animate-ping" />
+                      <span className="text-[10px] font-bold text-red-400 font-mono">{sosCountdown}s</span>
+                    </div>
+                  )}
                 </div>
+
+                {/* Active SOS info */}
+                {sosActive && (
+                  <div className="space-y-2">
+                    {sosLocation && (
+                      <div className="flex items-center gap-2 bg-white/5 rounded-xl p-3 border border-white/8">
+                        <MapPin size={12} className="text-red-400 shrink-0" />
+                        <div>
+                          <p className="text-[9px] text-gray-500 uppercase tracking-wider font-mono">Your GPS Location</p>
+                          <p className="text-xs font-mono text-white">{sosLocation.lat.toFixed(5)}, {sosLocation.lng.toFixed(5)}</p>
+                          <a
+                            href={`https://maps.google.com/?q=${sosLocation.lat},${sosLocation.lng}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="text-[9px] text-blue-400 underline"
+                          >
+                            View on Maps
+                          </a>
+                        </div>
+                      </div>
+                    )}
+                    {!sosLocation && (
+                      <p className="text-[10px] text-amber-400">⚠️ GPS unavailable — location not attached. Enable location for better results.</p>
+                    )}
+
+                    {/* Emergency call buttons */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <a
+                        href="tel:112"
+                        className="flex items-center justify-center gap-1.5 py-2.5 bg-red-500/20 border border-red-500/40 text-red-400 rounded-xl text-xs font-bold active:scale-95 transition-all"
+                      >
+                        <Phone size={12} /> Call 112
+                      </a>
+                      <a
+                        href="tel:100"
+                        className="flex items-center justify-center gap-1.5 py-2.5 bg-amber-500/20 border border-amber-500/40 text-amber-400 rounded-xl text-xs font-bold active:scale-95 transition-all"
+                      >
+                        <Phone size={12} /> Police 100
+                      </a>
+                    </div>
+                  </div>
+                )}
+
+                {/* SOS Trigger Button */}
                 <button
-                  onClick={() => {
-                    setSosActive(true);
-                    setTimeout(() => setSosActive(false), 5000);
-                    alert('🚨 SOS signal would be broadcast to all crew! (Connect to your socket for real dispatch)');
-                  }}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all cursor-pointer active:scale-95 ${
+                  onClick={handleSOS}
+                  disabled={sosActive || sosSending}
+                  className={`w-full py-3.5 rounded-xl text-sm font-black border transition-all cursor-pointer active:scale-95 flex items-center justify-center gap-2 disabled:cursor-not-allowed ${
                     sosActive
-                      ? 'bg-red-500 border-red-400 text-white animate-pulse'
-                      : 'bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20'
+                      ? 'bg-red-500/20 border-red-400/40 text-red-300'
+                      : sosSending
+                      ? 'bg-red-500/10 border-red-500/20 text-red-500 animate-pulse'
+                      : 'bg-red-500/15 border-red-500/40 text-red-400 hover:bg-red-500/25 hover:shadow-[0_0_20px_rgba(239,68,68,0.3)]'
                   }`}
                 >
-                  {sosActive ? '🚨 SOS SENT' : '🆘 SOS'}
+                  <AlertTriangle size={16} className={sosActive ? '' : 'animate-bounce'} />
+                  {sosActive ? `🚨 SOS BROADCAST ACTIVE (${sosCountdown}s)` : sosSending ? 'Broadcasting...' : '🆘 SEND SOS EMERGENCY SIGNAL'}
                 </button>
+
+                <p className="text-[9px] text-gray-600 text-center">
+                  This will alert ALL {trip.members?.length} crew members and share your GPS location
+                </p>
               </div>
             </div>
           </div>
