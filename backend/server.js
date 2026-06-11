@@ -25,6 +25,11 @@ const allowedOrigins = [
   'capacitor://localhost'
 ];
 
+if (process.env.ALLOWED_ORIGINS) {
+  const origins = process.env.ALLOWED_ORIGINS.split(',').map(o => o.trim());
+  allowedOrigins.push(...origins);
+}
+
 app.use(cors({
   origin: function (origin, callback) {
     // allow requests with no origin (like mobile apps or curl requests)

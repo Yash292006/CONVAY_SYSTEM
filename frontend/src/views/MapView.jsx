@@ -101,7 +101,7 @@ const MapView = () => {
 
   // ── 1. Load trip destination from backend ────────────────────────────────────
   useEffect(() => {
-    if (!tripId) return;
+    if (!tripId || tripId === 'live') return;
     const load = async () => {
       try {
         const res = await axios.get(`/trips/${tripId}`);
@@ -124,13 +124,15 @@ const MapView = () => {
     load();
   }, [tripId]);
 
+  const [locationError, setLocationError] = useState(null);
+
   // ── 2. Socket + GPS ──────────────────────────────────────────────────────────
   useEffect(() => {
     let backendUrl = import.meta.env.VITE_API_URL
       ? import.meta.env.VITE_API_URL.replace('/api', '')
       : 'http://localhost:5000';
     if (Capacitor.isNativePlatform()) {
-      const currentIP = '10.17.207.109';
+      const currentIP = import.meta.env.VITE_LOCAL_IP || '10.0.2.2';
       if (backendUrl.includes('localhost') || backendUrl.includes('127.0.0.1')) {
         backendUrl = backendUrl.replace('localhost', currentIP).replace('127.0.0.1', currentIP);
       }
@@ -167,6 +169,7 @@ const MapView = () => {
           const kmH = gpsSpeed ? Math.round(gpsSpeed * 3.6) : 0;
           setSpeed(kmH);
           setUserLocation({ latitude, longitude });
+          setLocationError(null);
           if (heading !== null) headingRef.current = heading;
 
           if (!hasCenteredRef.current) {
@@ -194,9 +197,14 @@ const MapView = () => {
             });
           }
         },
-        (err) => console.error(err),
-        { enableHighAccuracy: true }
+        (err) => {
+          console.error('Geolocation Error:', err);
+          setLocationError('Please enable GPS/Location access');
+        },
+        { enableHighAccuracy: true, timeout: 15000, maximumAge: 10000 }
       );
+    } else {
+      setLocationError('Geolocation not supported on this device');
     }
 
     return () => {
@@ -619,6 +627,22 @@ const MapView = () => {
           </AnimatePresence>
         </div>
       </div>
+
+      {/* ── LOCATION ERROR TOAST ── */}
+      <AnimatePresence>
+        {locationError && (
+          <motion.div
+            initial={{ y: 80, opacity: 0 }}
+            animate={{ y: -100, opacity: 1 }}
+            exit={{ y: 80, opacity: 0 }}
+            className="absolute bottom-10 left-1/2 -translate-x-1/2 z-50 bg-red-500/90 backdrop-blur-md px-6 py-3 rounded-full border border-white/20 shadow-xl"
+          >
+            <p className="text-white text-xs font-bold flex items-center gap-2">
+              <span className="text-lg">⚠️</span> {locationError}
+            </p>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* ── INCOMING PING TOAST ── */}
       <AnimatePresence>

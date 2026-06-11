@@ -18,8 +18,8 @@ import BottomNav from './components/BottomNav';
 const getBaseURL = () => {
   let url = import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
   if (Capacitor.isNativePlatform()) {
-    // 10.17.207.109 is the computer's current local Wi-Fi IP for physical device testing
-    const currentIP = '10.17.207.109';
+    // Dynamically retrieve the local development machine IP, defaulting to Android loopback (10.0.2.2) if not specified
+    const currentIP = import.meta.env.VITE_LOCAL_IP || '10.0.2.2';
     if (url.includes('localhost') || url.includes('127.0.0.1')) {
       url = url.replace('localhost', currentIP).replace('127.0.0.1', currentIP);
     }

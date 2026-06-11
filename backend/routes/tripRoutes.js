@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import Trip from '../models/Trip.js';
 import Expense from '../models/Expense.js';
 import User from '../models/User.js';
@@ -32,6 +33,11 @@ router.get('/', protect, async (req, res) => {
 // @access  Private
 router.get('/:id', protect, async (req, res) => {
   try {
+    // Check if it's a valid MongoDB ID
+    if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+      return res.status(400).json({ message: 'Invalid trip ID format' });
+    }
+
     const trip = await Trip.findById(req.params.id)
       .populate('admin', 'name email')
       .populate('members', 'name email');
